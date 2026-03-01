@@ -1,6 +1,7 @@
 """JSON chapters generator for Podcasting 2.0 support."""
 import json
 import logging
+import os
 import re
 from typing import List, Dict, Optional, Tuple
 
@@ -32,6 +33,20 @@ def get_chapters_model() -> str:
             return model
     except Exception as e:
         logger.warning(f"Could not load chapters model from DB: {e}")
+
+    # Provider-aware fallback: use the primary detection model for non-Anthropic providers
+    # (Ollama doesn't have Anthropic model names like claude-haiku-4-5-20251001)
+    provider = os.environ.get('LLM_PROVIDER', 'anthropic').lower()
+    if provider != 'anthropic':
+        try:
+            from database import PodcastDatabase
+            db = PodcastDatabase()
+            primary_model = db.get_setting('claude_model')
+            if primary_model:
+                return primary_model
+        except Exception:
+            pass
+
     return CHAPTERS_MODEL
 
 # Patterns to match timestamps in episode descriptions

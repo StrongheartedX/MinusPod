@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.31] - 2026-03-01
+
+### Fixed
+- **TextPatternMatcher vectorizer crash**: Guard `_load_patterns()` against None vectorizer. When `skip_patterns=True` (AI-only reprocess mode), `_ensure_initialized()` was never called, but pattern creation still triggered `_load_patterns()` which called `self._vectorizer.fit()` on None. Now auto-initializes the vectorizer on demand, with a graceful fallback if sklearn is unavailable.
+- **Chapters model 404 on Ollama**: `get_chapters_model()` now falls back to the user's primary detection model (`claude_model` DB setting) when `LLM_PROVIDER` is not `anthropic`, instead of hardcoding `claude-haiku-4-5-20251001` which Ollama doesn't have.
+
+### Added
+- **Chapters model DB seed**: `_seed_default_settings()` now seeds `chapters_model` with a provider-aware default so fresh Ollama installs get a valid model out of the box.
+- **README table of contents**: Added a linked table of contents for easier navigation.
+
 ## [1.0.30] - 2026-03-01
 
 ### Fixed

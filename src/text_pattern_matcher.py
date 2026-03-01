@@ -177,10 +177,15 @@ class TextPatternMatcher:
                     # even if they don't appear in existing patterns
                     base_text = ' '.join(BASE_AD_VOCABULARY)
                     all_texts = templates + [base_text]
-                    self._vectorizer.fit(all_texts)
-                    # Now transform only the patterns (not the base vocabulary)
-                    self._pattern_vectors = self._vectorizer.transform(templates)
-                    logger.info(f"Loaded {len(self._patterns)} text patterns")
+                    if self._vectorizer is None:
+                        self._ensure_initialized()
+                    if self._vectorizer is not None:
+                        self._vectorizer.fit(all_texts)
+                        # Now transform only the patterns (not the base vocabulary)
+                        self._pattern_vectors = self._vectorizer.transform(templates)
+                        logger.info(f"Loaded {len(self._patterns)} text patterns")
+                    else:
+                        logger.warning("Vectorizer unavailable, patterns loaded without TF-IDF indexing")
 
         except Exception as e:
             logger.error(f"Failed to load patterns: {e}")

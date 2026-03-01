@@ -1412,6 +1412,22 @@ class Database:
             ('chapters_enabled', 'true')
         )
 
+        # Chapters model (Podcasting 2.0) - provider-aware default
+        from chapters_generator import CHAPTERS_MODEL
+        chapters_default = CHAPTERS_MODEL
+        provider = os.environ.get('LLM_PROVIDER', 'anthropic').lower()
+        if provider != 'anthropic':
+            # For non-Anthropic providers, default to the primary detection model
+            cursor = conn.execute("SELECT value FROM settings WHERE key = 'claude_model'")
+            row = cursor.fetchone()
+            if row and row[0]:
+                chapters_default = row[0]
+        conn.execute(
+            """INSERT INTO settings (key, value, is_default) VALUES (?, ?, 1)
+               ON CONFLICT(key) DO NOTHING""",
+            ('chapters_model', chapters_default)
+        )
+
         conn.commit()
         logger.info("Default settings seeded")
 

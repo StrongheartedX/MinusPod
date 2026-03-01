@@ -6,6 +6,24 @@ Removes ads from podcasts using Whisper transcription. Serves modified RSS feeds
 
 > **Disclaimer:** This tool is for personal use only. Only use it with podcasts you have permission to modify or where such modification is permitted under applicable laws. Respect content creators and their terms of service.
 
+## Table of Contents
+
+- [How It Works](#how-it-works)
+- [Advanced Features](#advanced-features-quick-reference)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Web Interface](#web-interface)
+- [Configuration](#configuration)
+- [Finding Podcast RSS Feeds](#finding-podcast-rss-feeds)
+- [Usage](#usage)
+- [Environment Variables](#environment-variables)
+- [Using Ollama (Local LLM)](#using-ollama-local-llm)
+- [API](#api)
+- [Remote Access](#remote-access)
+- [Data Storage](#data-storage)
+- [Custom Assets](#custom-assets-optional)
+- [License](#license)
+
 ## How It Works
 
 1. **Transcription** - Whisper converts audio to text with timestamps
