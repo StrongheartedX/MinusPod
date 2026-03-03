@@ -84,19 +84,31 @@ class LLMModel:
 # =========================================================================
 
 _provider_cache: Dict[str, Any] = {}
+_provider_cache_lock = threading.Lock()
 _PROVIDER_CACHE_TTL = 5.0  # seconds
+
+# =========================================================================
+# Provider name constants
+# =========================================================================
+
+PROVIDER_ANTHROPIC = 'anthropic'
+PROVIDER_OPENAI_COMPATIBLE = 'openai-compatible'
+PROVIDER_OLLAMA = 'ollama'
+PROVIDERS_NON_ANTHROPIC = ('openai-compatible', 'openai', 'wrapper', 'ollama')
 
 
 def _get_cached_setting(key: str) -> Optional[str]:
     """Read a setting from DB with a short TTL cache to avoid per-request queries."""
-    entry = _provider_cache.get(key)
-    if entry and (time.monotonic() - entry['ts']) < _PROVIDER_CACHE_TTL:
-        return entry['val']
+    with _provider_cache_lock:
+        entry = _provider_cache.get(key)
+        if entry and (time.monotonic() - entry['ts']) < _PROVIDER_CACHE_TTL:
+            return entry['val']
     try:
         from database import Database
         db = Database()
         val = db.get_setting(key)
-        _provider_cache[key] = {'val': val, 'ts': time.monotonic()}
+        with _provider_cache_lock:
+            _provider_cache[key] = {'val': val, 'ts': time.monotonic()}
         return val
     except Exception:
         return None
@@ -104,7 +116,8 @@ def _get_cached_setting(key: str) -> Optional[str]:
 
 def _clear_provider_cache():
     """Flush the provider settings cache (called on force_new)."""
-    _provider_cache.clear()
+    with _provider_cache_lock:
+        _provider_cache.clear()
 
 
 def get_effective_provider() -> str:
@@ -129,16 +142,6 @@ def get_effective_base_url() -> str:
     if db_val:
         return db_val
     return os.environ.get('OPENAI_BASE_URL', 'http://localhost:8000/v1')
-
-
-# =========================================================================
-# Provider name constants
-# =========================================================================
-
-PROVIDER_ANTHROPIC = 'anthropic'
-PROVIDER_OPENAI_COMPATIBLE = 'openai-compatible'
-PROVIDER_OLLAMA = 'ollama'
-PROVIDERS_NON_ANTHROPIC = ('openai-compatible', 'openai', 'wrapper', 'ollama')
 
 
 class LLMClient(ABC):
@@ -251,7 +254,15 @@ class AnthropicClient(LLMClient):
         # Log request details
         _log_content("Anthropic system prompt", effective_system)
         for i, msg in enumerate(messages):
-            _log_content(f"Anthropic message[{i}] role={msg.get('role')}", str(msg.get('content', '')))
+            content_val = msg.get('content', '')
+            if isinstance(content_val, list):
+                content_str = ' '.join(
+                    part.get('text', '') for part in content_val
+                    if isinstance(part, dict) and part.get('type') == 'text'
+                ) or str(content_val)
+            else:
+                content_str = str(content_val)
+            _log_content(f"Anthropic message[{i}] role={msg.get('role')}", content_str)
         io_logger.debug(f"Anthropic request: model={model} temperature={temperature} max_tokens={max_tokens}")
 
         response = self._client.messages.create(
@@ -359,7 +370,15 @@ class OpenAICompatibleClient(LLMClient):
         # Log request details
         _log_content("OpenAI system prompt", system)
         for i, msg in enumerate(messages):
-            _log_content(f"OpenAI message[{i}] role={msg.get('role')}", str(msg.get('content', '')))
+            content_val = msg.get('content', '')
+            if isinstance(content_val, list):
+                content_str = ' '.join(
+                    part.get('text', '') for part in content_val
+                    if isinstance(part, dict) and part.get('type') == 'text'
+                ) or str(content_val)
+            else:
+                content_str = str(content_val)
+            _log_content(f"OpenAI message[{i}] role={msg.get('role')}", content_str)
         io_logger.debug(f"OpenAI request: model={model} temperature={temperature} max_tokens={max_tokens}")
 
         # Build request kwargs

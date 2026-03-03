@@ -50,7 +50,9 @@ function CollapsibleSection({
     }
   }, [isOpen]);
 
-  // Re-measure when children change (e.g. conditional content)
+  // Intentionally no dependency array: re-measures content height after every
+  // render so dynamic child changes (e.g. conditional content, async loads)
+  // are reflected in the animation. Cost is negligible (single DOM read).
   useEffect(() => {
     if (isOpen && maxHeight !== 'none') {
       const el = contentRef.current;

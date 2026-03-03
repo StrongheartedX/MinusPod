@@ -354,7 +354,7 @@ function Settings() {
       {/* 2. Security */}
       <CollapsibleSection
         title="Security"
-        subtitle={isPasswordSet ? 'Password protection is enabled' : 'No password set'}
+        subtitle={isPasswordSet ? 'Password protection is enabled' : 'No password set - app is publicly accessible'}
       >
         <div className="flex justify-end mb-4">
           {isPasswordSet && (

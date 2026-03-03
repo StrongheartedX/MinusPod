@@ -1636,6 +1636,10 @@ def update_ad_detection_settings():
         provider_changed = True
 
     if 'openaiBaseUrl' in data:
+        from urllib.parse import urlparse
+        parsed = urlparse(data['openaiBaseUrl'])
+        if not parsed.scheme or parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            return json_response({'error': 'Invalid base URL: must be a valid http:// or https:// URL'}, 400)
         db.set_setting('openai_base_url', data['openaiBaseUrl'], is_default=False)
         logger.info(f"Updated OpenAI base URL to: {data['openaiBaseUrl']}")
         provider_changed = True
@@ -1663,9 +1667,9 @@ def reset_ad_detection_settings():
     db.reset_setting('chapters_model')
 
     # Reset LLM provider settings back to env var defaults
-    from llm_client import get_llm_client, PROVIDER_ANTHROPIC
-    db.set_setting('llm_provider', os.environ.get('LLM_PROVIDER', PROVIDER_ANTHROPIC), is_default=True)
-    db.set_setting('openai_base_url', os.environ.get('OPENAI_BASE_URL', 'http://localhost:8000/v1'), is_default=True)
+    from llm_client import get_llm_client
+    db.reset_setting('llm_provider')
+    db.reset_setting('openai_base_url')
 
     # Recreate LLM client with reset settings
     get_llm_client(force_new=True)

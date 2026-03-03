@@ -6,6 +6,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.36] - 2026-03-03
+
+### Fixed
+- **Thread-safe provider cache**: Added `threading.Lock` to protect `_provider_cache` reads, writes, and clears in `llm_client.py`, preventing race conditions under concurrent requests.
+- **Reset settings consistency**: `reset_ad_detection_settings()` now uses `db.reset_setting()` for `llm_provider` and `openai_base_url` instead of manually re-deriving env var defaults, matching the pattern used by every other setting in the function.
+- **URL format validation**: `openaiBaseUrl` setting now validated via `urlparse` before storing -- rejects values without a valid `http://` or `https://` scheme or missing hostname.
+- **Security subtitle clarity**: Settings Security section shows "No password set - app is publicly accessible" instead of bare "No password set".
+- **LLM message logging**: Multi-part (list-type) message content now extracts text parts for readable debug logs instead of dumping raw `str()` representation, in both Anthropic and OpenAI-compatible clients.
+
+### Changed
+- **Provider constants ordering**: `PROVIDER_ANTHROPIC`, `PROVIDER_OPENAI_COMPATIBLE`, `PROVIDER_OLLAMA`, `PROVIDERS_NON_ANTHROPIC` moved before the functions that reference them in `llm_client.py`.
+- **CollapsibleSection useEffect comment**: Added explanatory comment for the intentional missing dependency array on the re-measure `useEffect`.
+
 ## [1.0.35] - 2026-03-02
 
 ### Fixed
