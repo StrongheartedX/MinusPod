@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Refresh button label**: Model refresh button now shows "Refresh" text alongside the icon (and "Refreshing..." with spinner when loading) instead of being icon-only.
+- **Provider string constants**: Replaced all inline `'anthropic'`/`'openai-compatible'`/`'ollama'` string literals with named constants (`PROVIDER_ANTHROPIC`, `PROVIDER_OLLAMA`, `PROVIDERS_NON_ANTHROPIC` in backend; `LLM_PROVIDERS` + `LlmProvider` type in frontend). Eliminates typo risk and centralizes provider vocabulary.
+- **hasChanges derived value**: Settings page `hasChanges` converted from `useState`+`useEffect` to `useMemo`, removing stale-state edge case after save.
+- **Inline spinners consolidated**: Replaced hand-rolled SVG spinner in Settings refresh button and border spinner in AddFeed OPML import with shared `LoadingSpinner` component (new `inline` prop).
+- **Duplicate pricing code extracted**: `_enrich_models_with_pricing()` helper replaces identical try/except blocks in `get_available_models()` and `refresh_models()` API routes.
 
 ## [1.0.34] - 2026-03-02
 

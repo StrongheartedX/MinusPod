@@ -1912,11 +1912,11 @@ class Database:
         # Import here to avoid circular import
         from ad_detector import DEFAULT_MODEL
         from chapters_generator import CHAPTERS_MODEL
-        from llm_client import get_effective_provider
+        from llm_client import get_effective_provider, PROVIDER_ANTHROPIC
 
         # Provider-aware defaults for model settings
         provider = get_effective_provider()
-        if provider != 'anthropic':
+        if provider != PROVIDER_ANTHROPIC:
             env_model = os.environ.get('OPENAI_MODEL')
             model_default = env_model or DEFAULT_MODEL
             chapters_default = env_model or CHAPTERS_MODEL

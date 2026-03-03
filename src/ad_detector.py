@@ -9,7 +9,7 @@ from llm_client import (
     get_llm_client, get_api_key, LLMClient,
     is_retryable_error, is_rate_limit_error,
     get_llm_timeout, get_llm_max_retries,
-    get_effective_provider
+    get_effective_provider, model_matches_provider
 )
 from utils.time import parse_timestamp, first_not_none
 
@@ -1115,7 +1115,7 @@ class AdDetector:
 
         for model_id in configured_models:
             if model_id and model_id not in existing_ids:
-                if not self._model_matches_provider(model_id, provider):
+                if not model_matches_provider(model_id, provider):
                     logger.debug(
                         f"Skipping configured model '{model_id}' -- "
                         f"does not match current provider '{provider}'"
@@ -1130,15 +1130,6 @@ class AdDetector:
                 existing_ids.add(model_id)
 
         return models_list
-
-    @staticmethod
-    def _model_matches_provider(model_id: str, provider: str) -> bool:
-        """Check whether a model ID plausibly belongs to the given provider."""
-        is_claude_model = 'claude' in model_id.lower()
-        if provider == 'anthropic':
-            return is_claude_model
-        # For non-Anthropic providers, reject Claude model IDs
-        return not is_claude_model
 
     def get_model(self) -> str:
         """Get configured model from database or default."""

@@ -94,6 +94,14 @@ export interface SettingValueNumber {
   isDefault: boolean;
 }
 
+export type LlmProvider = 'anthropic' | 'openai-compatible' | 'ollama';
+
+export const LLM_PROVIDERS = {
+  ANTHROPIC: 'anthropic' as const,
+  OPENAI_COMPATIBLE: 'openai-compatible' as const,
+  OLLAMA: 'ollama' as const,
+};
+
 export interface Settings {
   systemPrompt: SettingValue;
   verificationPrompt: SettingValue;
@@ -121,7 +129,7 @@ export interface Settings {
     chaptersEnabled: boolean;
     chaptersModel: string;
     minCutConfidence: number;
-    llmProvider: string;
+    llmProvider: LlmProvider;
     openaiBaseUrl: string;
   };
 }
@@ -138,7 +146,7 @@ export interface UpdateSettingsPayload {
   chaptersEnabled?: boolean;
   chaptersModel?: string;
   minCutConfidence?: number;
-  llmProvider?: string;
+  llmProvider?: LlmProvider;
   openaiBaseUrl?: string;
 }
 

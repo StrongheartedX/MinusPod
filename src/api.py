@@ -1463,7 +1463,7 @@ def get_settings():
     from database import DEFAULT_SYSTEM_PROMPT, DEFAULT_VERIFICATION_PROMPT
     from ad_detector import AdDetector, DEFAULT_MODEL
     from chapters_generator import CHAPTERS_MODEL
-    from llm_client import get_effective_provider, get_effective_base_url, get_api_key
+    from llm_client import get_effective_provider, get_effective_base_url, get_api_key, PROVIDER_ANTHROPIC
 
     settings = db.get_all_settings()
 
@@ -1561,7 +1561,7 @@ def get_settings():
             'chaptersEnabled': True,
             'chaptersModel': CHAPTERS_MODEL,
             'minCutConfidence': 0.80,
-            'llmProvider': os.environ.get('LLM_PROVIDER', 'anthropic'),
+            'llmProvider': os.environ.get('LLM_PROVIDER', PROVIDER_ANTHROPIC),
             'openaiBaseUrl': os.environ.get('OPENAI_BASE_URL', 'http://localhost:8000/v1')
         }
     })
@@ -1663,11 +1663,11 @@ def reset_ad_detection_settings():
     db.reset_setting('chapters_model')
 
     # Reset LLM provider settings back to env var defaults
-    db.set_setting('llm_provider', os.environ.get('LLM_PROVIDER', 'anthropic'), is_default=True)
+    from llm_client import get_llm_client, PROVIDER_ANTHROPIC
+    db.set_setting('llm_provider', os.environ.get('LLM_PROVIDER', PROVIDER_ANTHROPIC), is_default=True)
     db.set_setting('openai_base_url', os.environ.get('OPENAI_BASE_URL', 'http://localhost:8000/v1'), is_default=True)
 
     # Recreate LLM client with reset settings
-    from llm_client import get_llm_client
     get_llm_client(force_new=True)
 
     # Mark whisper model for reload
@@ -1694,21 +1694,11 @@ def reset_prompts_only():
     return json_response({'message': 'Prompts reset to defaults'})
 
 
-@api.route('/settings/models', methods=['GET'])
-@log_request
-def get_available_models():
-    """Get list of available Claude models."""
-    from ad_detector import AdDetector
-
-    ad_detector = AdDetector()
-    models = ad_detector.get_available_models()
-
-    # Refresh model pricing with any newly discovered models
+def _enrich_models_with_pricing(models: list) -> None:
+    """Refresh and attach pricing info to a list of model dicts in-place."""
     try:
         db = get_database()
         db.refresh_model_pricing(models)
-
-        # Enrich models with pricing info
         pricing_rows = db.get_model_pricing()
         pricing_lookup = {p['modelId']: p for p in pricing_rows}
         for model in models:
@@ -1718,6 +1708,17 @@ def get_available_models():
                 model['outputCostPerMtok'] = pricing['outputCostPerMtok']
     except Exception as e:
         logger.warning(f"Failed to refresh model pricing: {e}")
+
+
+@api.route('/settings/models', methods=['GET'])
+@log_request
+def get_available_models():
+    """Get list of available Claude models."""
+    from ad_detector import AdDetector
+
+    ad_detector = AdDetector()
+    models = ad_detector.get_available_models()
+    _enrich_models_with_pricing(models)
 
     return json_response({'models': models})
 
@@ -1732,20 +1733,7 @@ def refresh_models():
     get_llm_client(force_new=True)
     ad_detector = AdDetector()
     models = ad_detector.get_available_models()
-
-    # Enrich with pricing
-    try:
-        db = get_database()
-        db.refresh_model_pricing(models)
-        pricing_rows = db.get_model_pricing()
-        pricing_lookup = {p['modelId']: p for p in pricing_rows}
-        for model in models:
-            pricing = pricing_lookup.get(model['id'])
-            if pricing:
-                model['inputCostPerMtok'] = pricing['inputCostPerMtok']
-                model['outputCostPerMtok'] = pricing['outputCostPerMtok']
-    except Exception as e:
-        logger.warning(f"Failed to refresh model pricing: {e}")
+    _enrich_models_with_pricing(models)
 
     logger.info(f"Refreshed model list: {len(models)} models available")
     return json_response({'models': models, 'count': len(models)})

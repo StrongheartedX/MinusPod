@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSettings, updateSettings, resetSettings, resetPrompts, getModels, getWhisperModels, getSystemStatus, runCleanup, getProcessingEpisodes, cancelProcessing, refreshModels } from '../api/settings';
 import { setPassword, removePassword } from '../api/auth';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import CollapsibleSection from '../components/CollapsibleSection';
-import type { ClaudeModel } from '../api/types';
+import type { ClaudeModel, LlmProvider } from '../api/types';
+import { LLM_PROVIDERS } from '../api/types';
 
 function formatModelLabel(model: ClaudeModel): string {
   if (model.inputCostPerMtok != null && model.outputCostPerMtok != null) {
@@ -41,9 +42,9 @@ function Settings() {
   const [chaptersEnabled, setChaptersEnabled] = useState(true);
   const [chaptersModel, setChaptersModel] = useState('');
   const [minCutConfidence, setMinCutConfidence] = useState(0.80);
-  const [llmProvider, setLlmProvider] = useState('anthropic');
+  const [llmProvider, setLlmProvider] = useState<LlmProvider>(LLM_PROVIDERS.ANTHROPIC);
   const [openaiBaseUrl, setOpenaiBaseUrl] = useState('http://localhost:8000/v1');
-  const [hasChanges, setHasChanges] = useState(false);
+  // hasChanges is derived via useMemo below
   const [cleanupConfirm, setCleanupConfirm] = useState(false);
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
@@ -94,29 +95,28 @@ function Settings() {
       setChaptersEnabled(settings.chaptersEnabled?.value ?? true);
       setChaptersModel(settings.chaptersModel?.value || '');
       setMinCutConfidence(settings.minCutConfidence?.value ?? 0.80);
-      setLlmProvider(settings.llmProvider?.value || 'anthropic');
+      setLlmProvider((settings.llmProvider?.value || LLM_PROVIDERS.ANTHROPIC) as LlmProvider);
       setOpenaiBaseUrl(settings.openaiBaseUrl?.value || 'http://localhost:8000/v1');
     }
   }, [settings]);
 
-  useEffect(() => {
-    if (settings) {
-      const changed =
-        systemPrompt !== (settings.systemPrompt?.value || '') ||
-        verificationPrompt !== (settings.verificationPrompt?.value || '') ||
-        selectedModel !== (settings.claudeModel?.value || '') ||
-        verificationModel !== (settings.verificationModel?.value || '') ||
-        whisperModel !== (settings.whisperModel?.value || 'small') ||
-        autoProcessEnabled !== (settings.autoProcessEnabled?.value ?? true) ||
-        audioBitrate !== (settings.audioBitrate?.value || '128k') ||
-        vttTranscriptsEnabled !== (settings.vttTranscriptsEnabled?.value ?? true) ||
-        chaptersEnabled !== (settings.chaptersEnabled?.value ?? true) ||
-        chaptersModel !== (settings.chaptersModel?.value || '') ||
-        minCutConfidence !== (settings.minCutConfidence?.value ?? 0.80) ||
-        llmProvider !== (settings.llmProvider?.value || 'anthropic') ||
-        openaiBaseUrl !== (settings.openaiBaseUrl?.value || 'http://localhost:8000/v1');
-      setHasChanges(changed);
-    }
+  const hasChanges = useMemo(() => {
+    if (!settings) return false;
+    return (
+      systemPrompt !== (settings.systemPrompt?.value || '') ||
+      verificationPrompt !== (settings.verificationPrompt?.value || '') ||
+      selectedModel !== (settings.claudeModel?.value || '') ||
+      verificationModel !== (settings.verificationModel?.value || '') ||
+      whisperModel !== (settings.whisperModel?.value || 'small') ||
+      autoProcessEnabled !== (settings.autoProcessEnabled?.value ?? true) ||
+      audioBitrate !== (settings.audioBitrate?.value || '128k') ||
+      vttTranscriptsEnabled !== (settings.vttTranscriptsEnabled?.value ?? true) ||
+      chaptersEnabled !== (settings.chaptersEnabled?.value ?? true) ||
+      chaptersModel !== (settings.chaptersModel?.value || '') ||
+      minCutConfidence !== (settings.minCutConfidence?.value ?? 0.80) ||
+      llmProvider !== (settings.llmProvider?.value || LLM_PROVIDERS.ANTHROPIC) ||
+      openaiBaseUrl !== (settings.openaiBaseUrl?.value || 'http://localhost:8000/v1')
+    );
   }, [systemPrompt, verificationPrompt, selectedModel, verificationModel, whisperModel, autoProcessEnabled, audioBitrate, vttTranscriptsEnabled, chaptersEnabled, chaptersModel, minCutConfidence, llmProvider, openaiBaseUrl, settings]);
 
   const updateMutation = useMutation({
@@ -139,7 +139,6 @@ function Settings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['models'] });
-      setHasChanges(false);
     },
   });
 
@@ -486,16 +485,16 @@ function Settings() {
             <select
               id="llmProvider"
               value={llmProvider}
-              onChange={(e) => setLlmProvider(e.target.value)}
+              onChange={(e) => setLlmProvider(e.target.value as LlmProvider)}
               className="w-full px-4 py-2 rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="anthropic">Anthropic</option>
-              <option value="openai-compatible">OpenAI Compatible</option>
-              <option value="ollama">Ollama</option>
+              <option value={LLM_PROVIDERS.ANTHROPIC}>Anthropic</option>
+              <option value={LLM_PROVIDERS.OPENAI_COMPATIBLE}>OpenAI Compatible</option>
+              <option value={LLM_PROVIDERS.OLLAMA}>Ollama</option>
             </select>
           </div>
 
-          {llmProvider !== 'anthropic' && (
+          {llmProvider !== LLM_PROVIDERS.ANTHROPIC && (
             <div>
               <label htmlFor="openaiBaseUrl" className="block text-sm font-medium text-foreground mb-2">
                 Base URL
@@ -509,7 +508,7 @@ function Settings() {
                 className="w-full px-4 py-2 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm"
               />
               <p className="mt-1 text-sm text-muted-foreground">
-                {llmProvider === 'ollama'
+                {llmProvider === LLM_PROVIDERS.OLLAMA
                   ? 'Ollama server URL (e.g. http://localhost:11434)'
                   : 'OpenAI-compatible API endpoint (must end with /v1)'}
               </p>
@@ -523,7 +522,7 @@ function Settings() {
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
                 Configured (env)
               </span>
-            ) : llmProvider === 'anthropic' ? (
+            ) : llmProvider === LLM_PROVIDERS.ANTHROPIC ? (
               <>
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
@@ -555,10 +554,7 @@ function Settings() {
           >
             {refreshModelsMutation.isPending ? (
               <>
-                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
+                <LoadingSpinner inline className="w-3.5 h-3.5" />
                 Refreshing...
               </>
             ) : (

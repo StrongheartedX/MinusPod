@@ -112,7 +112,15 @@ def get_effective_provider() -> str:
     db_val = _get_cached_setting('llm_provider')
     if db_val:
         return db_val.lower()
-    return os.environ.get('LLM_PROVIDER', 'anthropic').lower()
+    return os.environ.get('LLM_PROVIDER', PROVIDER_ANTHROPIC).lower()
+
+
+def model_matches_provider(model_id: str, provider: str) -> bool:
+    """Check whether a model ID plausibly belongs to the given provider."""
+    is_claude_model = 'claude' in model_id.lower()
+    if provider == PROVIDER_ANTHROPIC:
+        return is_claude_model
+    return not is_claude_model
 
 
 def get_effective_base_url() -> str:
@@ -121,6 +129,16 @@ def get_effective_base_url() -> str:
     if db_val:
         return db_val
     return os.environ.get('OPENAI_BASE_URL', 'http://localhost:8000/v1')
+
+
+# =========================================================================
+# Provider name constants
+# =========================================================================
+
+PROVIDER_ANTHROPIC = 'anthropic'
+PROVIDER_OPENAI_COMPATIBLE = 'openai-compatible'
+PROVIDER_OLLAMA = 'ollama'
+PROVIDERS_NON_ANTHROPIC = ('openai-compatible', 'openai', 'wrapper', 'ollama')
 
 
 class LLMClient(ABC):
@@ -277,7 +295,7 @@ class AnthropicClient(LLMClient):
             response = self._client.models.list()
             models = []
             for model in response.data:
-                if 'claude' in model.id.lower():
+                if model_matches_provider(model.id, PROVIDER_ANTHROPIC):
                     models.append(LLMModel(
                         id=model.id,
                         name=model.display_name if hasattr(model, 'display_name') else model.id,
@@ -493,7 +511,7 @@ def get_llm_timeout() -> float:
     """
     from config import LLM_TIMEOUT_DEFAULT, LLM_TIMEOUT_LOCAL
     provider = get_effective_provider()
-    if provider != 'anthropic':
+    if provider != PROVIDER_ANTHROPIC:
         return LLM_TIMEOUT_LOCAL
     return LLM_TIMEOUT_DEFAULT
 
@@ -506,7 +524,7 @@ def get_llm_max_retries() -> int:
     """
     from config import LLM_RETRY_MAX_RETRIES, LLM_RETRY_MAX_RETRIES_LOCAL
     provider = get_effective_provider()
-    if provider != 'anthropic':
+    if provider != PROVIDER_ANTHROPIC:
         return LLM_RETRY_MAX_RETRIES_LOCAL
     return LLM_RETRY_MAX_RETRIES
 
@@ -616,11 +634,11 @@ def get_llm_client(force_new: bool = False) -> LLMClient:
 
     provider = get_effective_provider()
 
-    if provider == 'anthropic':
+    if provider == PROVIDER_ANTHROPIC:
         _cached_client = AnthropicClient()
-    elif provider in ('openai-compatible', 'openai', 'wrapper', 'ollama'):
+    elif provider in PROVIDERS_NON_ANTHROPIC:
         base_url = get_effective_base_url()
-        if provider == 'ollama' and not base_url.rstrip('/').endswith('/v1'):
+        if provider == PROVIDER_OLLAMA and not base_url.rstrip('/').endswith('/v1'):
             base_url = base_url.rstrip('/') + '/v1'
             logger.info(f"Ollama provider: normalized base_url to {base_url}")
         _cached_client = OpenAICompatibleClient(base_url=base_url)
@@ -643,7 +661,7 @@ def get_api_key() -> Optional[str]:
     """
     provider = get_effective_provider()
 
-    if provider == 'anthropic':
+    if provider == PROVIDER_ANTHROPIC:
         return os.environ.get('ANTHROPIC_API_KEY')
     else:
         return os.environ.get('OPENAI_API_KEY', os.environ.get('ANTHROPIC_API_KEY', 'not-needed'))
@@ -661,9 +679,9 @@ def verify_llm_connection() -> bool:
     """
     provider = get_effective_provider()
 
-    if provider in ('openai-compatible', 'openai', 'wrapper', 'ollama'):
+    if provider in PROVIDERS_NON_ANTHROPIC:
         base_url = get_effective_base_url()
-        if provider == 'ollama' and not base_url.rstrip('/').endswith('/v1'):
+        if provider == PROVIDER_OLLAMA and not base_url.rstrip('/').endswith('/v1'):
             base_url = base_url.rstrip('/') + '/v1'
         logger.info(f"Verifying LLM endpoint: {base_url}")
 
