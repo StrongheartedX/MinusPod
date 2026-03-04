@@ -1866,6 +1866,7 @@ def _try_become_background_leader() -> bool:
     """
     lock_path = Path(os.getenv('DATA_DIR', '/app/data')) / '.background_leader.lock'
     try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_file = open(lock_path, 'w')
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         # Keep file handle open (lock released when process exits)
@@ -1919,15 +1920,15 @@ def _startup():
         queue_thread = threading.Thread(target=background_queue_processor, daemon=True)
         queue_thread.start()
         logger.info("Started auto-process queue processor thread")
+
+        # Initial RSS refresh (leader only to avoid SQLite contention)
+        logger.info("Performing initial RSS refresh")
+        feed_map = get_feed_map()
+        for slug, feed_info in feed_map.items():
+            refresh_rss_feed(slug, feed_info['in'])
+            logger.info(f"Feed: {base_url}/{slug}")
     else:
         logger.info("Background threads managed by another worker, skipping")
-
-    # Initial RSS refresh
-    logger.info("Performing initial RSS refresh")
-    feed_map = get_feed_map()
-    for slug, feed_info in feed_map.items():
-        refresh_rss_feed(slug, feed_info['in'])
-        logger.info(f"Feed: {base_url}/{slug}")
 
     logger.info(f"Web UI available at: {base_url}/ui/")
 

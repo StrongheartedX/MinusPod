@@ -16,6 +16,7 @@ Removes ads from podcasts using Whisper transcription. Serves modified RSS feeds
 - [Configuration](#configuration)
 - [Finding Podcast RSS Feeds](#finding-podcast-rss-feeds)
 - [Usage](#usage)
+  - [Audiobookshelf](#audiobookshelf)
 - [Environment Variables](#environment-variables)
 - [Using Ollama (Local LLM)](#using-ollama-local-llm)
 - [API](#api)
