@@ -323,6 +323,16 @@ http://your-server:8000/your-feed-slug
 
 The feed URL is shown in the web UI and can be copied to clipboard.
 
+### Audiobookshelf
+
+If using [Audiobookshelf](https://www.audiobookshelf.org/) as your podcast client, its SSRF protection will block requests to MinusPod when running on a local/private network. Add your MinusPod hostname or IP to Audiobookshelf's whitelist:
+
+```
+SSRF_REQUEST_FILTER_WHITELIST=minuspod.local,192.168.1.100
+```
+
+This is a comma-separated list of domains excluded from Audiobookshelf's SSRF filter. See [Audiobookshelf Security docs](https://www.audiobookshelf.org/docs/#security) for details.
+
 ## Environment Variables
 
 | Variable | Default | Description |

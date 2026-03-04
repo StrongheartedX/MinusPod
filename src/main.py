@@ -1,4 +1,5 @@
 """Main Flask web server for podcast ad removal with web UI."""
+import fcntl
 import logging
 import os
 import signal
@@ -725,6 +726,12 @@ def background_queue_processor():
                 podcast_name = queued.get('podcast_title', slug)
                 published_at = queued.get('published_at')
                 description = queued.get('description')
+
+                # Check if auto-process is still enabled for this podcast
+                if not db.is_auto_process_enabled_for_podcast(slug):
+                    db.update_queue_status(queue_id, 'completed', 'Auto-process disabled for this feed')
+                    refresh_logger.info(f"[{slug}:{episode_id}] Skipped - auto-process disabled for this feed")
+                    continue
 
                 refresh_logger.info(f"[{slug}:{episode_id}] Auto-processing queued episode: {title}")
 
@@ -1851,6 +1858,23 @@ def health_check():
     return {'status': 'ok', 'feeds': len(feed_map), 'version': version}
 
 
+def _try_become_background_leader() -> bool:
+    """Try to acquire exclusive lock for background thread ownership.
+
+    Only one Gunicorn worker should run background tasks (RSS refresh,
+    queue processor) to avoid SQLite write contention.
+    """
+    lock_path = Path(os.getenv('DATA_DIR', '/app/data')) / '.background_leader.lock'
+    try:
+        lock_file = open(lock_path, 'w')
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Keep file handle open (lock released when process exits)
+        _try_become_background_leader._lock_file = lock_file
+        return True
+    except (IOError, OSError):
+        return False
+
+
 # Startup initialization (runs when module is imported by gunicorn)
 def _startup():
     """Initialize the application on startup."""
@@ -1884,15 +1908,19 @@ def _startup():
     sponsor_service.seed_initial_data()
     logger.info("Sponsor service initialized")
 
-    # Start background RSS refresh thread
-    refresh_thread = threading.Thread(target=background_rss_refresh, daemon=True)
-    refresh_thread.start()
-    logger.info("Started background refresh thread")
+    # Only one worker should run background tasks to avoid SQLite contention
+    if _try_become_background_leader():
+        # Start background RSS refresh thread
+        refresh_thread = threading.Thread(target=background_rss_refresh, daemon=True)
+        refresh_thread.start()
+        logger.info("Started background refresh thread")
 
-    # Start background queue processor thread for auto-processing
-    queue_thread = threading.Thread(target=background_queue_processor, daemon=True)
-    queue_thread.start()
-    logger.info("Started auto-process queue processor thread")
+        # Start background queue processor thread for auto-processing
+        queue_thread = threading.Thread(target=background_queue_processor, daemon=True)
+        queue_thread.start()
+        logger.info("Started auto-process queue processor thread")
+    else:
+        logger.info("Background threads managed by another worker, skipping")
 
     # Initial RSS refresh
     logger.info("Performing initial RSS refresh")

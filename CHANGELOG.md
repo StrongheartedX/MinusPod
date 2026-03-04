@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.37] - 2026-03-04
+
+### Fixed
+- **Auto-process "Always Disable" not respected (#61)**: Queue processor now checks `is_auto_process_enabled_for_podcast()` before processing each dequeued episode. Episodes queued before the setting was changed are marked completed and skipped.
+- **Database lock errors on fresh install (#62)**: Added file-lock leader election so only one Gunicorn worker starts background threads (RSS refresh, queue processor). Prevents duplicate threads across worker processes from causing SQLite write contention.
+
+### Added
+- **Audiobookshelf documentation**: Added README note about Audiobookshelf's SSRF filter blocking local MinusPod instances, with `SSRF_REQUEST_FILTER_WHITELIST` configuration instructions.
+
 ## [1.0.36] - 2026-03-03
 
 ### Fixed
