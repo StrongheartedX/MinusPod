@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.42] - 2026-03-10
 
 ### Fixed
-- **304 bypass prevents episode discovery**: Feeds returning HTTP 304 (unchanged) now check if episodes have been discovered. Pre-v1.0.41 feeds with zero discovered episodes force a full fetch so `bulk_upsert_discovered_episodes` runs.
-- **Completed episodes missing transcript/ad markers display**: Added fallback UI sections for completed episodes where `episode_details` data is missing, showing informational messages with reprocess guidance.
+- **Migration CASCADE data loss**: v1.0.41 migrations that rebuild the `episodes` table (DROP + recreate for CHECK constraints) triggered `ON DELETE CASCADE` on `episode_details`, destroying transcripts, ad markers, VTT, chapters, and LLM data. Migrations now disable `PRAGMA foreign_keys` before the DROP TABLE sequence and re-enable after commit.
+- **304 bypass prevents episode discovery**: Feeds returning HTTP 304 (unchanged) now check for *discovered* episodes specifically (not total count). Feeds with only completed/processed episodes (zero discovered) correctly force a full fetch for initial discovery.
 - **Console error "Cannot read properties of undefined (reading 'payload')"**: `apiRequest` now guards against empty/non-JSON responses (204 No Content, missing content-type) instead of unconditionally calling `response.json()`.
+
+### Removed
+- Fallback placeholder UI for missing episode details (no longer needed with safe migration preserving data).
 
 ## [1.0.41] - 2026-03-10
 

@@ -873,6 +873,9 @@ class Database:
                 common_columns = [c for c in old_columns if c in new_columns]
                 columns_str = ', '.join(common_columns)
 
+                # Disable FK to prevent CASCADE deleting episode_details during DROP
+                conn.execute("PRAGMA foreign_keys = OFF")
+
                 # 2. Copy data (only common columns, defaults fill the rest)
                 conn.execute(f"""
                     INSERT INTO episodes_new ({columns_str})
@@ -891,6 +894,9 @@ class Database:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_episodes_processed_at ON episodes(processed_at)")
 
                 conn.commit()
+
+                # Re-enable FK enforcement
+                conn.execute("PRAGMA foreign_keys = ON")
                 logger.info("Migration: Successfully updated episodes table CHECK constraint")
         except Exception as e:
             logger.error(f"Migration failed for episodes CHECK constraint: {e}")
@@ -941,6 +947,9 @@ class Database:
                 common_columns = [c for c in old_columns if c in new_columns]
                 columns_str = ', '.join(common_columns)
 
+                # Disable FK to prevent CASCADE deleting episode_details during DROP
+                conn.execute("PRAGMA foreign_keys = OFF")
+
                 conn.execute(f"""
                     INSERT INTO episodes_new ({columns_str})
                     SELECT {columns_str} FROM episodes
@@ -954,6 +963,9 @@ class Database:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_episodes_processed_at ON episodes(processed_at)")
 
                 conn.commit()
+
+                # Re-enable FK enforcement
+                conn.execute("PRAGMA foreign_keys = ON")
                 logger.info("Migration: Successfully updated episodes table CHECK constraint for discovered status")
         except Exception as e:
             logger.error(f"Migration failed for episodes discovered CHECK constraint: {e}")

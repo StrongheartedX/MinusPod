@@ -482,8 +482,8 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
         # Handle 304 Not Modified - feed hasn't changed
         if feed_content is None and (new_etag or new_last_modified):
             # If no episodes exist yet (pre-v1.0.41 feed), force full fetch for initial discovery
-            _, episode_count = db.get_episodes(slug, limit=1)
-            if episode_count > 0:
+            _, discovered_count = db.get_episodes(slug, status='discovered', limit=1)
+            if discovered_count > 0:
                 refresh_logger.info(f"[{slug}] Feed unchanged (304), skipping refresh")
                 status_service.complete_feed_refresh(slug, 0)
                 return True
