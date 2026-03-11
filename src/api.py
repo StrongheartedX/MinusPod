@@ -739,17 +739,21 @@ def get_artwork(slug):
 
     artwork = storage.get_artwork(slug)
     if not artwork:
-        # Try to get from database and download
+        # Artwork file missing on disk -- try to recover
         db = get_database()
         podcast = db.get_podcast_by_slug(slug)
         if podcast:
+            # Clear stale artwork_cached flag so download_artwork won't short-circuit
+            if podcast.get('artwork_cached'):
+                db.update_podcast(slug, artwork_cached=0)
+
             artwork_url = podcast.get('artwork_url')
-            # If artwork_url is NULL (never extracted), try to extract from the source feed.
-            # Empty string means extraction was attempted but found nothing -- skip re-fetch.
-            if artwork_url is None and podcast.get('source_url'):
+            # If artwork_url is NULL or empty string, (re-)extract from the source feed.
+            # Previous empty-string sentinels may be stale (feed updated, extraction improved).
+            if not artwork_url and podcast.get('source_url'):
                 artwork_url = _extract_artwork_url_from_feed(podcast['source_url'])
-                # Store result (or empty string sentinel) to avoid repeated feed fetches
-                db.update_podcast(slug, artwork_url=artwork_url or '')
+                if artwork_url:
+                    db.update_podcast(slug, artwork_url=artwork_url)
             if artwork_url:
                 storage.download_artwork(slug, artwork_url)
                 artwork = storage.get_artwork(slug)

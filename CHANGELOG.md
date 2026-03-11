@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`return undefined as T` in apiRequest**: Changed to `return {} as T` to prevent runtime TypeError when callers destructure empty/204 responses.
 - **`cleanup_old_episodes` crash with `storage=None`**: Now raises `ValueError` early instead of crashing with `AttributeError` deep in the call stack.
 - **Bulk actions N+1 DB queries**: Replaced per-episode DB calls in `delete_episodes`, `bulk_episode_action` (process/reprocess/delete) with batch methods (`batch_clear_episode_details`, `batch_reset_episodes_to_discovered`, `batch_set_episodes_pending`). For 500 episodes, reduces ~2000 DB calls to ~3.
+- **Artwork 404 for feeds with stale cache flag**: When artwork file is missing on disk but `artwork_cached=1` in DB, the artwork endpoint now clears the stale flag, re-extracts the URL from the source feed (including empty-string sentinels from prior failed extractions), and re-downloads. Also fixes `download_artwork` short-circuit that trusted the DB flag without verifying the file exists.
 
 ## [1.0.42] - 2026-03-10
 
