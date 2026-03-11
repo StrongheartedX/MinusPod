@@ -3065,6 +3065,14 @@ components:
         false_positive_count:
           type: integer
           description: Number of times pattern was marked as false positive
+        avg_duration:
+          type:
+            - number
+            - 'null'
+          description: Running average of observed ad duration in seconds. Null for patterns that have not yet been matched with duration data.
+        duration_samples:
+          type: integer
+          description: Number of duration observations used to compute avg_duration
         last_matched_at:
           type:
             - string
