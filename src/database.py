@@ -7,6 +7,7 @@ import os
 import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional, Dict, List, Any, Tuple
 
 import nh3
@@ -247,6 +248,7 @@ CREATE TABLE IF NOT EXISTS podcasts (
     audio_analysis_override TEXT,
     auto_process_override TEXT,
     skip_second_pass INTEGER DEFAULT 0,
+    max_episodes INTEGER,
     created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -259,7 +261,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     original_url TEXT NOT NULL,
     title TEXT,
     description TEXT,
-    status TEXT DEFAULT 'pending' CHECK(status IN ('pending','processing','processed','failed','permanently_failed')),
+    status TEXT DEFAULT 'pending' CHECK(status IN ('discovered','pending','processing','processed','failed','permanently_failed')),
     retry_count INTEGER DEFAULT 0,
     processed_file TEXT,
     processed_at TEXT,
@@ -271,6 +273,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     error_message TEXT,
     ad_detection_status TEXT DEFAULT NULL CHECK(ad_detection_status IN (NULL, 'success', 'failed')),
     artwork_url TEXT,
+    episode_number INTEGER,
     created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     FOREIGN KEY (podcast_id) REFERENCES podcasts(id) ON DELETE CASCADE,
@@ -780,6 +783,7 @@ class Database:
             ('reprocess_requested_at', 'TEXT'),
             ('published_at', 'TEXT'),
             ('retry_count', 'INTEGER DEFAULT 0'),
+            ('episode_number', 'INTEGER'),
         ]
         for col, definition in episodes_migrations:
             self._add_column_if_missing(conn, 'episodes', col, definition, ep_cols)
@@ -813,6 +817,7 @@ class Database:
             ('created_at', "TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"),
             ('auto_process_override', 'TEXT'),
             ('skip_second_pass', 'INTEGER DEFAULT 0'),
+            ('max_episodes', 'INTEGER'),
             ('etag', 'TEXT'),
             ('last_modified_header', 'TEXT'),
         ]
@@ -870,6 +875,9 @@ class Database:
                 common_columns = [c for c in old_columns if c in new_columns]
                 columns_str = ', '.join(common_columns)
 
+                # Disable FK to prevent CASCADE deleting episode_details during DROP
+                conn.execute("PRAGMA foreign_keys = OFF")
+
                 # 2. Copy data (only common columns, defaults fill the rest)
                 conn.execute(f"""
                     INSERT INTO episodes_new ({columns_str})
@@ -888,10 +896,82 @@ class Database:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_episodes_processed_at ON episodes(processed_at)")
 
                 conn.commit()
+
+                # Re-enable FK enforcement
+                conn.execute("PRAGMA foreign_keys = ON")
                 logger.info("Migration: Successfully updated episodes table CHECK constraint")
         except Exception as e:
             logger.error(f"Migration failed for episodes CHECK constraint: {e}")
             raise  # This is critical - app cannot function without this migration
+
+        # Migration: Update episodes status CHECK constraint to include 'discovered'
+        try:
+            cursor = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='episodes'")
+            create_sql = cursor.fetchone()
+            if create_sql and 'discovered' not in create_sql[0]:
+                logger.info("Migration: Updating episodes table CHECK constraint for discovered status...")
+
+                cursor = conn.execute("PRAGMA table_info(episodes)")
+                old_columns = [row['name'] for row in cursor.fetchall()]
+
+                conn.execute("""
+                    CREATE TABLE episodes_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        podcast_id INTEGER NOT NULL,
+                        episode_id TEXT NOT NULL,
+                        original_url TEXT NOT NULL,
+                        title TEXT,
+                        description TEXT,
+                        status TEXT DEFAULT 'pending' CHECK(status IN ('discovered','pending','processing','processed','failed','permanently_failed')),
+                        retry_count INTEGER DEFAULT 0,
+                        processed_file TEXT,
+                        processed_at TEXT,
+                        original_duration REAL,
+                        new_duration REAL,
+                        ads_removed INTEGER DEFAULT 0,
+                        ads_removed_firstpass INTEGER DEFAULT 0,
+                        ads_removed_secondpass INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        ad_detection_status TEXT DEFAULT NULL CHECK(ad_detection_status IN (NULL, 'success', 'failed')),
+                        artwork_url TEXT,
+                        reprocess_mode TEXT,
+                        reprocess_requested_at TEXT,
+                        published_at TEXT,
+                        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                        updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                        FOREIGN KEY (podcast_id) REFERENCES podcasts(id) ON DELETE CASCADE,
+                        UNIQUE(podcast_id, episode_id)
+                    )
+                """)
+
+                cursor = conn.execute("PRAGMA table_info(episodes_new)")
+                new_columns = [row['name'] for row in cursor.fetchall()]
+                common_columns = [c for c in old_columns if c in new_columns]
+                columns_str = ', '.join(common_columns)
+
+                # Disable FK to prevent CASCADE deleting episode_details during DROP
+                conn.execute("PRAGMA foreign_keys = OFF")
+
+                conn.execute(f"""
+                    INSERT INTO episodes_new ({columns_str})
+                    SELECT {columns_str} FROM episodes
+                """)
+
+                conn.execute("DROP TABLE episodes")
+                conn.execute("ALTER TABLE episodes_new RENAME TO episodes")
+
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_episodes_podcast ON episodes(podcast_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_episodes_status ON episodes(status)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_episodes_processed_at ON episodes(processed_at)")
+
+                conn.commit()
+
+                # Re-enable FK enforcement
+                conn.execute("PRAGMA foreign_keys = ON")
+                logger.info("Migration: Successfully updated episodes table CHECK constraint for discovered status")
+        except Exception as e:
+            logger.error(f"Migration failed for episodes discovered CHECK constraint: {e}")
+            raise
 
         # Migration: Create auto_process_queue table if not exists
         try:
@@ -1113,6 +1193,33 @@ class Database:
             ('llm_cost', 'REAL DEFAULT 0.0'),
         ]:
             self._add_column_if_missing(conn, 'processing_history', col, definition, hist_cols)
+
+        # Migration: retention_period_minutes -> retention_days
+        try:
+            retention_days_exists = conn.execute(
+                "SELECT COUNT(*) FROM settings WHERE key = 'retention_days'"
+            ).fetchone()[0]
+
+            if not retention_days_exists:
+                env_minutes = os.environ.get('RETENTION_PERIOD')
+                if env_minutes:
+                    days = max(1, round(int(env_minutes) / 1440))
+                else:
+                    existing = conn.execute(
+                        "SELECT value, is_default FROM settings WHERE key = 'retention_period_minutes'"
+                    ).fetchone()
+                    if existing and not existing['is_default']:
+                        days = max(1, round(int(existing['value']) / 1440))
+                    else:
+                        days = 30
+                conn.execute(
+                    "INSERT INTO settings (key, value, is_default) VALUES ('retention_days', ?, 1)",
+                    (str(days),)
+                )
+                conn.commit()
+                logger.info(f"Migration: Created retention_days setting = {days}")
+        except Exception as e:
+            logger.warning(f"Migration failed for retention_days: {e}")
 
     def _cleanup_contaminated_patterns(self):
         """Delete patterns with text_template > 3500 chars (contaminated).
@@ -1496,7 +1603,7 @@ class Database:
             if key in ('title', 'description', 'artwork_url', 'artwork_cached',
                        'last_checked_at', 'source_url', 'network_id', 'dai_platform',
                        'network_id_override', 'audio_analysis_override', 'auto_process_override',
-                       'etag', 'last_modified_header'):
+                       'max_episodes', 'etag', 'last_modified_header'):
                 fields.append(f"{key} = ?")
                 values.append(value)
 
@@ -1537,9 +1644,12 @@ class Database:
 
     # ========== Episode Methods ==========
 
+    VALID_SORT_COLUMNS = {'published_at', 'created_at', 'episode_number', 'title', 'status'}
+
     def get_episodes(self, slug: str, status: str = None,
-                     limit: int = 50, offset: int = 0) -> Tuple[List[Dict], int]:
-        """Get episodes for a podcast with pagination."""
+                     limit: int = 50, offset: int = 0,
+                     sort_by: str = 'created_at', sort_dir: str = 'desc') -> Tuple[List[Dict], int]:
+        """Get episodes for a podcast with pagination and sorting."""
         conn = self.get_connection()
 
         # Get podcast ID
@@ -1564,12 +1674,23 @@ class Database:
         )
         total = cursor.fetchone()[0]
 
+        # Build ORDER BY clause with whitelist validation
+        sort_col = sort_by if sort_by in self.VALID_SORT_COLUMNS else 'created_at'
+        sort_direction = 'ASC' if sort_dir == 'asc' else 'DESC'
+
+        if sort_col == 'episode_number':
+            order_clause = f"ORDER BY e.episode_number IS NULL, e.episode_number {sort_direction}"
+        elif sort_col == 'published_at':
+            order_clause = f"ORDER BY COALESCE(e.published_at, e.created_at) {sort_direction}"
+        else:
+            order_clause = f"ORDER BY e.{sort_col} {sort_direction}"
+
         # Get episodes
         params.extend([limit, offset])
         cursor = conn.execute(
             f"""SELECT e.* FROM episodes e
                 {where_clause}
-                ORDER BY e.created_at DESC
+                {order_clause}
                 LIMIT ? OFFSET ?""",
             params
         )
@@ -1581,7 +1702,8 @@ class Database:
         """Get episode by slug and episode_id."""
         conn = self.get_connection()
         cursor = conn.execute(
-            """SELECT e.*, p.slug, ed.transcript_text, ed.transcript_vtt,
+            """SELECT e.*, p.slug, p.title AS podcast_title,
+                      ed.transcript_text, ed.transcript_vtt,
                       ed.chapters_json, ed.ad_markers_json,
                       ed.first_pass_response, ed.first_pass_prompt,
                       ed.second_pass_prompt, ed.second_pass_response
@@ -1666,7 +1788,8 @@ class Database:
                                'processed_at', 'original_duration', 'new_duration',
                                'ads_removed', 'ads_removed_firstpass', 'ads_removed_secondpass',
                                'error_message', 'ad_detection_status', 'artwork_url',
-                               'reprocess_mode', 'reprocess_requested_at', 'retry_count', 'published_at'):
+                               'reprocess_mode', 'reprocess_requested_at', 'retry_count',
+                               'published_at', 'episode_number'):
                         fields.append(f"{key} = ?")
                         values.append(value)
 
@@ -1685,8 +1808,9 @@ class Database:
                    (podcast_id, episode_id, original_url, title, description, status,
                     processed_file, processed_at, original_duration,
                     new_duration, ads_removed, ads_removed_firstpass, ads_removed_secondpass,
-                    error_message, ad_detection_status, artwork_url, retry_count, published_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    error_message, ad_detection_status, artwork_url, episode_number,
+                    retry_count, published_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     podcast_id,
                     episode_id,
@@ -1704,6 +1828,7 @@ class Database:
                     kwargs.get('error_message'),
                     kwargs.get('ad_detection_status'),
                     kwargs.get('artwork_url'),
+                    kwargs.get('episode_number'),
                     kwargs.get('retry_count', 0),
                     kwargs.get('published_at')
                 )
@@ -1945,79 +2070,296 @@ class Database:
 
     # ========== Cleanup Methods ==========
 
-    def cleanup_old_episodes(self, force_all: bool = False) -> Tuple[int, float]:
-        """
-        Delete episodes older than retention period, or all episodes if force_all=True.
-        Returns (count deleted, MB freed estimate).
+    def bulk_upsert_discovered_episodes(self, slug: str, episodes: List[Dict]) -> int:
+        """Insert episodes as 'discovered' if they do not already exist.
+
+        Never overwrites an existing episode's status.
+        Returns count of newly inserted rows.
         """
         conn = self.get_connection()
 
-        if force_all:
-            # Delete ALL episodes immediately
-            cursor = conn.execute(
-                """SELECT e.id, e.episode_id, e.processed_file, p.slug
-                   FROM episodes e
-                   JOIN podcasts p ON e.podcast_id = p.id"""
-            )
-        else:
-            # Get retention period - env var takes precedence over database setting
-            retention_minutes = int(os.environ.get('RETENTION_PERIOD') or
-                                   self.get_setting('retention_period_minutes') or '1440')
+        podcast = self.get_podcast_by_slug(slug)
+        if not podcast:
+            logger.error(f"Cannot upsert discovered episodes: podcast not found: {slug}")
+            return 0
 
-            if retention_minutes <= 0:
-                return 0, 0.0
+        podcast_id = podcast['id']
+        inserted = 0
 
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=retention_minutes)
-            cutoff_str = cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')
-
-            # Get episodes to delete
-            cursor = conn.execute(
-                """SELECT e.id, e.episode_id, e.processed_file, p.slug
-                   FROM episodes e
-                   JOIN podcasts p ON e.podcast_id = p.id
-                   WHERE e.created_at < ?""",
-                (cutoff_str,)
-            )
-
-        episodes_to_delete = cursor.fetchall()
-        deleted_count = 0
-        freed_bytes = 0
-
-        for row in episodes_to_delete:
-            slug = row['slug']
-            episode_id = row['episode_id']
-
-            # Delete files
-            podcast_dir = self.data_dir / "podcasts" / slug / "episodes"
-
-            # Only delete audio file - transcript/ads/prompt stored in database
-            # Database cascade delete handles episode_details table
-            file_path = podcast_dir / f"{episode_id}.mp3"
-            if file_path.exists():
+        for ep in episodes:
+            # Parse RFC2822 published date to ISO format
+            iso_published = None
+            published_str = ep.get('published', '')
+            if published_str:
                 try:
-                    freed_bytes += file_path.stat().st_size
-                    file_path.unlink()
-                except Exception as e:
-                    logger.warning(f"Failed to delete {file_path}: {e}")
+                    parsed_pub = parsedate_to_datetime(published_str)
+                    iso_published = parsed_pub.strftime('%Y-%m-%dT%H:%M:%SZ')
+                except (ValueError, TypeError):
+                    pass
 
-            deleted_count += 1
+            # Check for existing episode with same title+date but different ID
+            # Skip insert to prevent duplicate rows from GUID changes
+            if ep.get('title') and iso_published:
+                existing = conn.execute(
+                    """SELECT episode_id, episode_number FROM episodes
+                       WHERE podcast_id = ? AND title = ? AND published_at = ?
+                       AND episode_id != ?""",
+                    (podcast_id, ep.get('title'), iso_published, ep['id'])
+                ).fetchone()
+                if existing:
+                    # Backfill episode_number on existing row if missing
+                    if ep.get('episode_number') and not existing['episode_number']:
+                        conn.execute(
+                            """UPDATE episodes SET episode_number = ?
+                               WHERE podcast_id = ? AND episode_id = ?
+                               AND episode_number IS NULL""",
+                            (ep.get('episode_number'), podcast_id, existing['episode_id'])
+                        )
+                    continue  # Skip - episode already exists with different GUID
 
-        # Delete from database (cascade deletes episode_details)
-        if force_all:
-            conn.execute("DELETE FROM episodes")
-        else:
-            conn.execute(
-                "DELETE FROM episodes WHERE created_at < ?",
-                (cutoff_str,)
-            )
+            try:
+                cursor = conn.execute(
+                    """INSERT INTO episodes
+                       (podcast_id, episode_id, original_url, title, description,
+                        artwork_url, episode_number, published_at, status)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'discovered')
+                       ON CONFLICT(podcast_id, episode_id) DO UPDATE SET
+                        episode_number = COALESCE(excluded.episode_number, episodes.episode_number),
+                        published_at = COALESCE(episodes.published_at, excluded.published_at),
+                        original_url = COALESCE(episodes.original_url, excluded.original_url),
+                        title = COALESCE(episodes.title, excluded.title),
+                        description = COALESCE(episodes.description, excluded.description),
+                        artwork_url = COALESCE(episodes.artwork_url, excluded.artwork_url)""",
+                    (
+                        podcast_id,
+                        ep['id'],
+                        ep.get('url', ''),
+                        ep.get('title'),
+                        ep.get('description'),
+                        ep.get('artwork_url'),
+                        ep.get('episode_number'),
+                        iso_published,
+                    )
+                )
+                if cursor.rowcount > 0:
+                    inserted += 1
+            except Exception as e:
+                logger.warning(f"Failed to upsert discovered episode {ep.get('id')}: {e}")
+
+        conn.commit()
+        return inserted
+
+    def _reset_episode_to_discovered(self, slug: str, episode_id: str) -> None:
+        """Clear episode_details and reset an episode back to 'discovered' state."""
+        self.clear_episode_details(slug, episode_id)
+        self.upsert_episode(
+            slug, episode_id,
+            status='discovered',
+            processed_file=None,
+            processed_at=None,
+            original_duration=None,
+            new_duration=None,
+            ads_removed=0,
+            ads_removed_firstpass=0,
+            ads_removed_secondpass=0,
+            error_message=None,
+            ad_detection_status=None,
+        )
+
+    def get_processed_episodes_for_feed(self, podcast_id: int) -> List[Dict]:
+        """Get all processed episodes with files for inclusion in RSS feed."""
+        conn = self.get_connection()
+        cursor = conn.execute(
+            """SELECT episode_id, title, description, published_at,
+                      new_duration, episode_number, original_url
+               FROM episodes
+               WHERE podcast_id = ? AND status = 'processed'
+                     AND processed_file IS NOT NULL
+               ORDER BY published_at DESC""",
+            (podcast_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_episodes_by_ids(self, slug: str, episode_ids: List[str]) -> List[Dict]:
+        """Get multiple episodes by slug and episode_ids in a single query."""
+        if not episode_ids:
+            return []
+        conn = self.get_connection()
+        placeholders = ','.join('?' for _ in episode_ids)
+        cursor = conn.execute(
+            f"""SELECT e.*, p.slug
+                FROM episodes e
+                JOIN podcasts p ON e.podcast_id = p.id
+                WHERE p.slug = ? AND e.episode_id IN ({placeholders})""",
+            [slug] + list(episode_ids)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def batch_clear_episode_details(self, slug: str, episode_ids: List[str]) -> None:
+        """Clear episode_details for multiple episodes in one query."""
+        if not episode_ids:
+            return
+        episodes = self.get_episodes_by_ids(slug, episode_ids)
+        if not episodes:
+            return
+        db_ids = [ep['id'] for ep in episodes]
+        conn = self.get_connection()
+        placeholders = ','.join('?' for _ in db_ids)
+        conn.execute(
+            f"DELETE FROM episode_details WHERE episode_id IN ({placeholders})",
+            db_ids
+        )
         conn.commit()
 
+    def batch_reset_episodes_to_discovered(self, slug: str, episode_ids: List[str]) -> None:
+        """Reset multiple episodes to discovered state in one query."""
+        if not episode_ids:
+            return
+        conn = self.get_connection()
+        podcast = self.get_podcast_by_slug(slug)
+        if not podcast:
+            return
+        placeholders = ','.join('?' for _ in episode_ids)
+        conn.execute(
+            f"""UPDATE episodes SET
+                status = 'discovered',
+                processed_file = NULL, processed_at = NULL,
+                original_duration = NULL, new_duration = NULL,
+                ads_removed = 0, ads_removed_firstpass = 0, ads_removed_secondpass = 0,
+                error_message = NULL, ad_detection_status = NULL,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+            WHERE podcast_id = ? AND episode_id IN ({placeholders})""",
+            [podcast['id']] + list(episode_ids)
+        )
+        conn.commit()
+
+    def batch_set_episodes_pending(self, slug: str, episode_ids: List[str],
+                                    reprocess_mode: str = None,
+                                    reprocess_requested_at: str = None) -> int:
+        """Set multiple episodes to pending status in one query."""
+        if not episode_ids:
+            return 0
+        conn = self.get_connection()
+        podcast = self.get_podcast_by_slug(slug)
+        if not podcast:
+            return 0
+        placeholders = ','.join('?' for _ in episode_ids)
+        params = [reprocess_mode, reprocess_requested_at, podcast['id']] + list(episode_ids)
+        cursor = conn.execute(
+            f"""UPDATE episodes SET
+                status = 'pending', retry_count = 0, error_message = NULL,
+                reprocess_mode = ?, reprocess_requested_at = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+            WHERE podcast_id = ? AND episode_id IN ({placeholders})""",
+            params
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    def delete_episodes(self, slug: str, episode_ids: List[str], storage) -> Tuple[int, float]:
+        """Delete audio files and reset episodes to 'discovered'.
+
+        Does NOT delete DB rows. Does NOT touch processing_history.
+        Returns (count reset, MB freed).
+        """
+        episodes = self.get_episodes_by_ids(slug, episode_ids)
+        episodes_by_id = {ep['episode_id']: ep for ep in episodes}
+
+        freed_bytes = 0
+        ids_to_reset = []
+
+        for episode_id in episode_ids:
+            episode = episodes_by_id.get(episode_id)
+            if not episode or not episode.get('processed_file'):
+                continue
+
+            freed_bytes += storage.cleanup_episode_files(slug, episode_id)
+            ids_to_reset.append(episode_id)
+
+        if ids_to_reset:
+            self.batch_clear_episode_details(slug, ids_to_reset)
+            self.batch_reset_episodes_to_discovered(slug, ids_to_reset)
+
         freed_mb = freed_bytes / (1024 * 1024)
+        return len(ids_to_reset), freed_mb
 
-        if deleted_count > 0:
-            logger.info(f"Cleaned up {deleted_count} old episodes, freed {freed_mb:.1f} MB")
+    def vacuum(self) -> int:
+        """Run SQLITE VACUUM to reclaim disk space and compact WAL.
 
-        return deleted_count, freed_mb
+        Returns duration in milliseconds.
+        """
+        start = time.time()
+        conn = self.get_connection()
+        # VACUUM cannot run inside a transaction
+        old_isolation = conn.isolation_level
+        conn.isolation_level = None
+        try:
+            conn.execute("VACUUM")
+        finally:
+            conn.isolation_level = old_isolation
+        duration_ms = int((time.time() - start) * 1000)
+        logger.info(f"VACUUM completed in {duration_ms}ms")
+        return duration_ms
+
+    def cleanup_old_episodes(self, force_all: bool = False, storage=None) -> Tuple[int, float]:
+        """Reset episodes with files older than retention_days back to 'discovered'.
+
+        Deletes audio files and episode_details. Never deletes episode rows.
+        force_all=True resets ALL episodes with files regardless of age.
+        Returns (count reset, MB freed).
+        """
+        if storage is None:
+            raise ValueError("storage is required for cleanup_old_episodes")
+
+        conn = self.get_connection()
+
+        if not force_all:
+            retention_days = int(self.get_setting('retention_days') or '30')
+            if retention_days <= 0:
+                return 0, 0.0
+
+            cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+            cutoff_str = cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            cursor = conn.execute(
+                """SELECT e.episode_id, p.slug
+                   FROM episodes e
+                   JOIN podcasts p ON e.podcast_id = p.id
+                   WHERE e.processed_file IS NOT NULL
+                     AND e.processed_at < ?
+                     AND e.status IN ('processed', 'failed', 'permanently_failed')""",
+                (cutoff_str,)
+            )
+        else:
+            cursor = conn.execute(
+                """SELECT e.episode_id, p.slug
+                   FROM episodes e
+                   JOIN podcasts p ON e.podcast_id = p.id
+                   WHERE e.processed_file IS NOT NULL
+                     AND e.status IN ('processed', 'failed', 'permanently_failed')"""
+            )
+
+        episodes_to_reset = cursor.fetchall()
+        if not episodes_to_reset:
+            return 0, 0.0
+
+        # Group by slug for batch processing
+        by_slug = {}
+        for row in episodes_to_reset:
+            by_slug.setdefault(row['slug'], []).append(row['episode_id'])
+
+        total_reset = 0
+        total_freed_mb = 0.0
+
+        for slug, episode_ids in by_slug.items():
+            reset, freed = self.delete_episodes(slug, episode_ids, storage)
+            total_reset += reset
+            total_freed_mb += freed
+
+        if total_reset > 0:
+            logger.info(f"Retention cleanup: reset {total_reset} episodes to discovered, freed {total_freed_mb:.1f} MB")
+
+        return total_reset, total_freed_mb
 
     # ========== Stats Methods ==========
 

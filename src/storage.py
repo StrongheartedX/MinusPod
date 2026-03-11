@@ -330,11 +330,14 @@ class Storage:
             return False
 
         try:
-            # Check if we already have this artwork
+            # Check if we already have this artwork on disk
             podcast = self.db.get_podcast_by_slug(slug)
             if podcast and podcast.get('artwork_url') == artwork_url and podcast.get('artwork_cached'):
-                logger.debug(f"[{slug}] Artwork already cached")
-                return True
+                # Verify the file actually exists before trusting the DB flag
+                if self.get_artwork(slug) is not None:
+                    logger.debug(f"[{slug}] Artwork already cached")
+                    return True
+                logger.info(f"[{slug}] artwork_cached flag set but file missing, re-downloading")
 
             try:
                 validate_url(artwork_url)

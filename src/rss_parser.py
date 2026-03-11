@@ -3,7 +3,8 @@ import feedparser
 import logging
 import hashlib
 import os
-from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
+from email.utils import format_datetime, parsedate_to_datetime
 from typing import Dict, List, Optional
 import requests
 
@@ -127,6 +128,19 @@ class RSSParser:
             logger.error(f"Failed to parse RSS feed: {e}")
             return None
 
+    @staticmethod
+    def extract_podcast_artwork_url(parsed_feed) -> Optional[str]:
+        """Extract podcast-level artwork URL from a parsed feed."""
+        if not parsed_feed or not parsed_feed.feed:
+            return None
+        feed = parsed_feed.feed
+        if hasattr(feed, 'image') and hasattr(feed.image, 'href'):
+            return feed.image.href
+        # Fallback to itunes:image
+        if 'itunes_image' in feed:
+            return feed.itunes_image.get('href')
+        return None
+
     def generate_episode_id(self, episode_url: str, guid: str = None) -> str:
         """Generate consistent episode ID from GUID or URL.
 
@@ -141,13 +155,19 @@ class RSSParser:
         # Fallback to URL hash for feeds without GUIDs
         return hashlib.md5(episode_url.encode()).hexdigest()[:12]
 
-    def modify_feed(self, feed_content: str, slug: str, storage=None) -> str:
+    def modify_feed(self, feed_content: str, slug: str, storage=None,
+                    max_episodes: int = 300,
+                    extra_episodes: Optional[List[Dict]] = None) -> str:
         """Modify RSS feed to use our server URLs.
 
         Args:
             feed_content: Original RSS feed XML
             slug: Podcast slug
             storage: Optional Storage instance for checking Podcasting 2.0 assets
+            max_episodes: Max episodes to include in feed (1-500, default 300)
+            extra_episodes: Processed episodes from DB to append beyond the cap.
+                Each dict must have: episode_id, title, description, published_at,
+                new_duration, episode_number.
         """
         feed = self.parse_feed(feed_content)
         if not feed:
@@ -177,13 +197,14 @@ class RSSParser:
 
         # Limit to most recent episodes to keep feed size manageable
         # Pocket Casts and other apps may reject very large feeds (>1MB)
-        max_episodes = 100
+        max_episodes = max(1, min(max_episodes, 500))
         entries = feed.entries[:max_episodes]
 
         if len(feed.entries) > max_episodes:
             logger.info(f"[{slug}] Limiting feed from {len(feed.entries)} to {max_episodes} episodes")
 
-        # Process each episode
+        # Process each episode from RSS
+        included_episode_ids = set()
         for entry in entries:
             episode_url = None
             # Find audio URL in enclosures
@@ -198,6 +219,7 @@ class RSSParser:
                 continue
 
             episode_id = self.generate_episode_id(episode_url, entry.get('id'))
+            included_episode_ids.add(episode_id)
             modified_url = f"{self.base_url}/episodes/{slug}/{episode_id}.mp3"
 
             lines.append('<item>')
@@ -221,6 +243,12 @@ class RSSParser:
                 if explicit and str(explicit).lower() in ('true', 'false', 'yes', 'no'):
                     lines.append(f'  <itunes:explicit>{explicit}</itunes:explicit>')
 
+            # Episode number (itunes:episode)
+            if hasattr(entry, 'itunes_episode'):
+                ep_num = entry.itunes_episode
+                if ep_num and str(ep_num).strip():
+                    lines.append(f'  <itunes:episode>{ep_num}</itunes:episode>')
+
             # Episode artwork (itunes:image)
             artwork_url = None
             if hasattr(entry, 'image') and hasattr(entry.image, 'href'):
@@ -231,25 +259,67 @@ class RSSParser:
                 lines.append(f'  <itunes:image href="{self._escape_xml(artwork_url)}" />')
 
             # Podcasting 2.0 tags (transcript and chapters)
-            if storage:
-                # Add transcript tag if VTT file exists
-                if storage.has_transcript_vtt(slug, episode_id):
-                    transcript_url = f"{self.base_url}/episodes/{slug}/{episode_id}.vtt"
-                    lines.append(f'  <podcast:transcript url="{transcript_url}" type="text/vtt" language="en" rel="captions" />')
-
-                # Add chapters tag if chapters JSON exists
-                if storage.has_chapters_json(slug, episode_id):
-                    chapters_url = f"{self.base_url}/episodes/{slug}/{episode_id}/chapters.json"
-                    lines.append(f'  <podcast:chapters url="{chapters_url}" type="application/json+chapters" />')
+            self._append_podcasting2_tags(lines, slug, episode_id, storage)
 
             lines.append('</item>')
+
+        # Append processed episodes that fell outside the RSS cap
+        appended_count = 0
+        if extra_episodes:
+            for ep in extra_episodes:
+                ep_id = ep['episode_id']
+                if ep_id in included_episode_ids:
+                    continue
+                self._append_db_episode_item(lines, slug, ep, storage)
+                appended_count += 1
 
         lines.append('</channel>')
         lines.append('</rss>')
 
+        total_episodes = len(entries) + appended_count
         modified_rss = '\n'.join(lines)
-        logger.info(f"[{slug}] Modified RSS feed with {len(entries)} episodes")
+        logger.info(f"[{slug}] Modified RSS feed with {total_episodes} episodes ({appended_count} appended from DB)")
         return modified_rss
+
+    def _append_podcasting2_tags(self, lines: list, slug: str, episode_id: str, storage) -> None:
+        """Append Podcasting 2.0 transcript and chapters tags if available."""
+        if not storage:
+            return
+        if storage.has_transcript_vtt(slug, episode_id):
+            transcript_url = f"{self.base_url}/episodes/{slug}/{episode_id}.vtt"
+            lines.append(f'  <podcast:transcript url="{transcript_url}" type="text/vtt" language="en" rel="captions" />')
+        if storage.has_chapters_json(slug, episode_id):
+            chapters_url = f"{self.base_url}/episodes/{slug}/{episode_id}/chapters.json"
+            lines.append(f'  <podcast:chapters url="{chapters_url}" type="application/json+chapters" />')
+
+    def _append_db_episode_item(self, lines: list, slug: str, ep: Dict, storage) -> None:
+        """Append a single <item> for a processed episode from the database."""
+        ep_id = ep['episode_id']
+        modified_url = f"{self.base_url}/episodes/{slug}/{ep_id}.mp3"
+        lines.append('<item>')
+        lines.append(f'  <title>{self._escape_xml(ep.get("title") or "Unknown")}</title>')
+        if ep.get('description'):
+            lines.append(f'  <description>{self._escape_xml(ep["description"])}</description>')
+        lines.append(f'  <enclosure url="{modified_url}" type="audio/mpeg" />')
+        lines.append(f'  <guid isPermaLink="false">{ep_id}</guid>')
+        if ep.get('published_at'):
+            lines.append(f'  <pubDate>{self._format_rfc2822(ep["published_at"])}</pubDate>')
+        if ep.get('new_duration'):
+            lines.append(f'  <itunes:duration>{int(ep["new_duration"])}</itunes:duration>')
+        if ep.get('episode_number'):
+            lines.append(f'  <itunes:episode>{ep["episode_number"]}</itunes:episode>')
+        self._append_podcasting2_tags(lines, slug, ep_id, storage)
+        lines.append('</item>')
+
+    def _format_rfc2822(self, iso_date: str) -> str:
+        """Convert ISO 8601 date string to RFC 2822 format for RSS pubDate."""
+        try:
+            dt = datetime.fromisoformat(iso_date.replace('Z', '+00:00'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return format_datetime(dt)
+        except (ValueError, TypeError, AttributeError):
+            return iso_date
 
     def _escape_xml(self, text: str) -> str:
         """Escape XML special characters."""
@@ -357,6 +427,14 @@ class RSSParser:
                 elif 'itunes_image' in entry:
                     artwork_url = entry.itunes_image.get('href')
 
+                # Extract episode number (itunes:episode)
+                episode_number = None
+                if hasattr(entry, 'itunes_episode'):
+                    try:
+                        episode_number = int(entry.itunes_episode)
+                    except (ValueError, TypeError):
+                        pass
+
                 episodes.append({
                     'id': self.generate_episode_id(episode_url, entry.get('id', '')),
                     'url': episode_url,
@@ -364,6 +442,7 @@ class RSSParser:
                     'published': entry.get('published', ''),
                     'description': entry.get('description', ''),
                     'artwork_url': artwork_url,
+                    'episode_number': episode_number,
                 })
 
         # De-duplicate episodes (keep latest when multiple versions exist)

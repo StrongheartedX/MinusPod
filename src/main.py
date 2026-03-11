@@ -481,9 +481,28 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
 
         # Handle 304 Not Modified - feed hasn't changed
         if feed_content is None and (new_etag or new_last_modified):
-            refresh_logger.info(f"[{slug}] Feed unchanged (304), skipping refresh")
-            status_service.complete_feed_refresh(slug, 0)
-            return True
+            # If no episodes exist yet (pre-v1.0.41 feed), force full fetch for initial discovery
+            _, discovered_count = db.get_episodes(slug, status='discovered', limit=1)
+            if discovered_count > 0:
+                # Even on 304, ensure artwork is cached (may be missing after DB restore)
+                podcast = db.get_podcast_by_slug(slug)
+                if podcast and not podcast.get('artwork_cached'):
+                    refresh_logger.info(f"[{slug}] Feed unchanged (304) but artwork missing, forcing full fetch")
+                    feed_content, new_etag, new_last_modified = rss_parser.fetch_feed_conditional(
+                        feed_url, etag=None, last_modified=None
+                    )
+                else:
+                    refresh_logger.info(f"[{slug}] Feed unchanged (304), skipping refresh")
+                    status_service.complete_feed_refresh(slug, 0)
+                    return True
+            else:
+                refresh_logger.info(
+                    f"[{slug}] Feed unchanged (304) but no episodes discovered yet, "
+                    f"forcing full fetch for initial discovery"
+                )
+                feed_content, new_etag, new_last_modified = rss_parser.fetch_feed_conditional(
+                    feed_url, etag=None, last_modified=None
+                )
 
         if not feed_content:
             refresh_logger.error(f"[{slug}] Failed to fetch RSS feed")
@@ -497,11 +516,7 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
             description = parsed_feed.feed.get('description', '')[:500]
 
             # Extract artwork URL
-            artwork_url = None
-            if hasattr(parsed_feed.feed, 'image') and hasattr(parsed_feed.feed.image, 'href'):
-                artwork_url = parsed_feed.feed.image.href
-            elif 'image' in parsed_feed.feed and 'href' in parsed_feed.feed.image:
-                artwork_url = parsed_feed.feed.image.href
+            artwork_url = rss_parser.extract_podcast_artwork_url(parsed_feed)
 
             # Update podcast metadata in database
             db.update_podcast(
@@ -536,17 +551,22 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
             if artwork_url:
                 storage.download_artwork(slug, artwork_url)
 
+        # Discover all episodes from the feed (upsert as 'discovered')
+        all_episodes = rss_parser.extract_episodes(feed_content)
+        inserted = db.bulk_upsert_discovered_episodes(slug, all_episodes)
+        if inserted > 0:
+            refresh_logger.info(f"[{slug}] Discovered {inserted} new episode(s)")
+
         # Queue new episodes for auto-processing if enabled
         # Only queue episodes published within the last 48 hours to avoid processing entire backlog
         if db.is_auto_process_enabled_for_podcast(slug):
-            episodes = rss_parser.extract_episodes(feed_content)
             queued_count = 0
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=48)
 
-            for ep in episodes:
-                # Check if episode already exists in database
+            for ep in all_episodes:
+                # Check if episode already exists in database with a non-discovered status
                 existing = db.get_episode(slug, ep['id'])
-                if existing is None:
+                if existing is None or existing.get('status') == 'discovered':
                     # Also check by title+pubDate to catch ID changes (Megaphone feeds, etc.)
                     # This prevents duplicate processing when RSS GUID changes
                     published_str = ep.get('published', '')
@@ -562,7 +582,7 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
                         existing_by_title = db.get_episode_by_title_and_date(
                             slug, ep.get('title'), iso_published
                         )
-                        if existing_by_title:
+                        if existing_by_title and existing_by_title['episode_id'] != ep['id']:
                             refresh_logger.warning(
                                 f"[{slug}] Episode ID changed: {existing_by_title['episode_id']} -> {ep['id']}, "
                                 f"title: {ep.get('title')}"
@@ -599,7 +619,11 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
                 refresh_logger.info(f"[{slug}] Queued {queued_count} new episode(s) for auto-processing")
 
         # Modify feed URLs (pass storage to include Podcasting 2.0 tags)
-        modified_rss = rss_parser.modify_feed(feed_content, slug, storage=storage)
+        feed_cap = podcast.get('max_episodes') or 300
+        extra_episodes = db.get_processed_episodes_for_feed(podcast['id'])
+        modified_rss = rss_parser.modify_feed(feed_content, slug, storage=storage,
+                                               max_episodes=feed_cap,
+                                               extra_episodes=extra_episodes)
 
         # Save modified RSS
         storage.save_rss(slug, modified_rss)
@@ -646,9 +670,9 @@ def refresh_all_feeds():
 def run_cleanup():
     """Run episode cleanup based on retention period."""
     try:
-        deleted, freed_mb = db.cleanup_old_episodes()
-        if deleted > 0:
-            refresh_logger.info(f"Cleanup: removed {deleted} episodes, freed {freed_mb:.1f} MB")
+        reset_count, freed_mb = db.cleanup_old_episodes(storage=storage)
+        if reset_count > 0:
+            refresh_logger.info(f"Cleanup: reset {reset_count} episodes to discovered, freed {freed_mb:.1f} MB")
     except Exception as e:
         refresh_logger.error(f"Cleanup failed: {e}")
 
@@ -1476,10 +1500,14 @@ def process_episode(slug: str, episode_id: str, episode_url: str,
         status_service.start_job(slug, episode_id, episode_title, podcast_name)
         status_service.update_job_stage("downloading", 0)
 
-        db.upsert_episode(slug, episode_id,
+        upsert_kwargs = dict(
             original_url=episode_url, title=episode_title,
             description=episode_description, artwork_url=episode_artwork_url,
-            published_at=episode_published_at, status='processing')
+            status='processing'
+        )
+        if episode_published_at:
+            upsert_kwargs['published_at'] = episode_published_at
+        db.upsert_episode(slug, episode_id, **upsert_kwargs)
 
         # Stage 1: Download and transcribe
         audio_path, segments = _download_and_transcribe(slug, episode_id, episode_url, podcast_name)
@@ -1704,21 +1732,35 @@ def serve_rss(slug):
         abort(503)
 
 
-def _lookup_episode(slug, episode_id, feed_map):
+def _lookup_episode(slug, episode_id, feed_map, episode_row=None):
     """Fetch the RSS feed once and return episode data + podcast name.
 
     Returns (episode_dict, podcast_name) or (None, None).
-    episode_dict keys: url, title, description, artwork_url.
+    episode_dict keys: url, title, description, artwork_url, published.
+    Falls back to database if episode is not in the upstream RSS feed.
     """
     original_feed = rss_parser.fetch_feed(feed_map[slug]['in'])
-    if not original_feed:
-        return None, None
-    parsed_feed = rss_parser.parse_feed(original_feed)
-    podcast_name = parsed_feed.feed.get('title', 'Unknown') if parsed_feed else 'Unknown'
-    episodes = rss_parser.extract_episodes(original_feed)
-    for ep in episodes:
-        if ep['id'] == episode_id:
-            return ep, podcast_name
+    if original_feed:
+        parsed_feed = rss_parser.parse_feed(original_feed)
+        podcast_name = parsed_feed.feed.get('title', 'Unknown') if parsed_feed else 'Unknown'
+        episodes = rss_parser.extract_episodes(original_feed)
+        for ep in episodes:
+            if ep['id'] == episode_id:
+                return ep, podcast_name
+
+    # Fallback: episode not in upstream RSS (dropped off due to age/cap).
+    # Use the original_url stored in the database from discovery.
+    episode = episode_row or db.get_episode(slug, episode_id)
+    if episode and episode.get('original_url'):
+        return {
+            'id': episode_id,
+            'url': episode['original_url'],
+            'title': episode.get('title'),
+            'description': episode.get('description'),
+            'artwork_url': episode.get('artwork_url'),
+            'published': episode.get('published_at'),
+        }, episode.get('podcast_title', 'Unknown')
+
     return None, None
 
 
@@ -1808,15 +1850,15 @@ def serve_episode(slug, episode_id):
 
     # HEAD requests should not trigger processing - proxy upstream headers
     if request.method == 'HEAD' and status != 'processed':
-        ep_data, _ = _lookup_episode(slug, episode_id, feed_map)
+        ep_data, _ = _lookup_episode(slug, episode_id, feed_map, episode_row=episode)
         if ep_data:
             return _head_upstream(slug, episode_id, ep_data['url'])
         abort(404)
 
     # Need to process - find original URL from RSS
-    ep_data, podcast_name = _lookup_episode(slug, episode_id, feed_map)
+    ep_data, podcast_name = _lookup_episode(slug, episode_id, feed_map, episode_row=episode)
     if not ep_data:
-        feed_logger.error(f"[{slug}:{episode_id}] Episode not found in RSS")
+        feed_logger.error(f"[{slug}:{episode_id}] Episode not found in RSS or database")
         abort(404)
 
     original_url = ep_data['url']
@@ -1827,7 +1869,8 @@ def serve_episode(slug, episode_id):
     # Start background processing (non-blocking)
     started, reason = start_background_processing(
         slug, episode_id, original_url, episode_title,
-        podcast_name, episode_description, episode_artwork_url
+        podcast_name, episode_description, episode_artwork_url,
+        published_at=ep_data.get('published')
     )
 
     if started:

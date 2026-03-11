@@ -6,6 +6,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.45] - 2026-03-11
+
+### Fixed
+- **Auto-processing self-match**: Dedup check in auto-process loop matched the episode's own record, preventing all new episodes from being queued. Added `episode_id != ep['id']` guard so dedup only triggers for genuinely different episode rows.
+- **Duplicate episode rows from GUID changes**: `bulk_upsert_discovered_episodes` now checks for existing episodes with same title+date before inserting, preventing duplicate rows when RSS feeds change GUIDs. Backfills `episode_number` on existing rows if missing.
+- **Sort broken for NULL `published_at`**: "Newest First" sort now uses `COALESCE(published_at, created_at)` so episodes with NULL `published_at` (from pre-v1.0.43 processing) sort by creation date instead of sinking to the bottom.
+- **ON CONFLICT doesn't backfill NULL fields**: `bulk_upsert_discovered_episodes` ON CONFLICT clause now backfills NULL `published_at`, `original_url`, `title`, `description`, and `artwork_url` from RSS data without overwriting existing values.
+
+## [1.0.44] - 2026-03-11
+
+### Fixed
+- **Duplicate `db.get_episode` query in `serve_episode`**: `_lookup_episode()` now accepts an optional pre-fetched episode row, eliminating a redundant JOIN query on the DB fallback path.
+- **Inaccurate log message**: Error log for episode not found now says "not found in RSS or database" instead of just "in RSS".
+- **Type hint `List[Dict] = None`**: Changed to `Optional[List[Dict]] = None` in `modify_feed()` signature.
+- **Redundant `get_podcast_by_slug` in `get_processed_episodes_for_feed`**: Method now accepts `podcast_id` directly instead of resolving slug internally, avoiding an unnecessary GROUP BY query when the caller already has the podcast dict.
+
+## [1.0.43] - 2026-03-11
+
+### Added
+- **Episode sort by episode number**: Episodes can now be sorted by episode number (from `itunes:episode` tag), publish date, or creation date. Sort dropdown on feed detail page with options: Newest First, Oldest First, Episode # High-Low, Episode # Low-High.
+- **`episode_number` field**: Parsed from RSS `itunes:episode` tag end-to-end -- RSS parsing, DB storage, API response (`episodeNumber`), and RSS feed output.
+- **`sort_by` / `sort_dir` API params**: `GET /api/v1/feeds/{slug}/episodes` now accepts `sort_by` (published_at, created_at, episode_number, title, status) and `sort_dir` (asc, desc).
+- **Processed episodes appended beyond RSS cap**: RSS feed now appends processed episodes from the DB that fall outside the `max_episodes` cap. Podcast clients can see and download older processed episodes that would otherwise be invisible.
+- **DB fallback for old episodes**: `_lookup_episode()` now falls back to the database when an episode is not in the upstream RSS feed (e.g., dropped off due to age/cap). On-demand processing works for any discovered episode.
+
+### Fixed
+- **Artwork missing after DB restore**: Feed refresh returning 304 (unchanged) now checks if artwork is cached. If artwork is missing (e.g., after a DB restore), forces a full fetch to re-extract and download artwork instead of returning early.
+- **Artwork extraction missing itunes:image fallback**: Podcast-level artwork extraction now falls back to `itunes:image` when the standard RSS `<image>` tag is absent, matching the pattern already used for episode-level artwork in `rss_parser.py`.
+- **Self-healing artwork endpoint**: When both the cached artwork file and `artwork_url` are missing (e.g., after extraction failures), the artwork endpoint now fetches the source RSS feed, extracts the artwork URL, persists it to the DB, and downloads the image on-demand instead of returning 404.
+- **`return undefined as T` in apiRequest**: Changed to `return {} as T` to prevent runtime TypeError when callers destructure empty/204 responses.
+- **`cleanup_old_episodes` crash with `storage=None`**: Now raises `ValueError` early instead of crashing with `AttributeError` deep in the call stack.
+- **Bulk actions N+1 DB queries**: Replaced per-episode DB calls in `delete_episodes`, `bulk_episode_action` (process/reprocess/delete) with batch methods (`batch_clear_episode_details`, `batch_reset_episodes_to_discovered`, `batch_set_episodes_pending`). For 500 episodes, reduces ~2000 DB calls to ~3.
+- **Artwork 404 for feeds with stale cache flag**: When artwork file is missing on disk but `artwork_cached=1` in DB, the artwork endpoint now clears the stale flag, re-extracts the URL from the source feed (including empty-string sentinels from prior failed extractions), and re-downloads. Also fixes `download_artwork` short-circuit that trusted the DB flag without verifying the file exists.
+- **Processing overwrites `published_at` with NULL**: `serve_episode()` now passes `published_at` to background processing. `process_episode()` defensively skips `published_at` when None to avoid overwriting a good value. Fixes episodes dropping to bottom of "Newest First" sort during processing.
+
+## [1.0.42] - 2026-03-10
+
+### Fixed
+- **Migration CASCADE data loss**: v1.0.41 migrations that rebuild the `episodes` table (DROP + recreate for CHECK constraints) triggered `ON DELETE CASCADE` on `episode_details`, destroying transcripts, ad markers, VTT, chapters, and LLM data. Migrations now disable `PRAGMA foreign_keys` before the DROP TABLE sequence and re-enable after commit.
+- **304 bypass prevents episode discovery**: Feeds returning HTTP 304 (unchanged) now check for *discovered* episodes specifically (not total count). Feeds with only completed/processed episodes (zero discovered) correctly force a full fetch for initial discovery.
+- **Console error "Cannot read properties of undefined (reading 'payload')"**: `apiRequest` now guards against empty/non-JSON responses (204 No Content, missing content-type) instead of unconditionally calling `response.json()`.
+
+### Removed
+- Fallback placeholder UI for missing episode details (no longer needed with safe migration preserving data).
+
+## [1.0.41] - 2026-03-10
+
+### Added
+- **Episode discovery**: All episodes from a feed are now surfaced in the MinusPod UI as `discovered` on every feed refresh. Users can process any episode at any time. Episode records persist indefinitely regardless of retention settings.
+- **Bulk episode actions**: Select multiple episodes on the feed detail page and apply Process, Reprocess (Patterns + AI), Reprocess (Full), or Delete in one action. Bulk actions are page-scoped with per-action eligibility enforcement.
+- **Episode pagination**: Feed detail episode list is paginated (default 25 per page, options: 25 / 50 / 100 / 500).
+- **Per-feed RSS episode cap**: New `maxEpisodes` setting controls how many episodes are served to podcast clients (default 300, max 500). Configurable on add or via feed settings. Changing the cap triggers a full feed refresh.
+- **Retention UI**: Retention period now configurable in Settings (days, or disabled).
+- **`POST /api/v1/system/vacuum`**: Trigger SQLite VACUUM for manual disk space reclamation. API-only.
+- **`POST /api/v1/feeds/{slug}/episodes/bulk`**: Bulk episode actions API.
+- **`GET/PUT /api/v1/settings/retention`**: Retention configuration API.
+
+### Changed
+- **Retention behaviour**: Retention now deletes audio files and resets episodes to `discovered` instead of hard-deleting episode rows. Episode records, processing history, ad markers, and corrections are preserved. Measured in days (default 30) instead of minutes (default 1440). `RETENTION_PERIOD` env var is deprecated but still supported (converted from minutes on first startup).
+- **RSS episode cap default raised**: From 100 to 300.
+- **Episodes list default page size**: From 50 to 25. Max increased from 200 to 500.
+- **Code quality**: Extracted `_reset_episode_to_discovered()` helper to eliminate 3x duplicated 10-field upsert calls. Extracted shared `EPISODE_STATUS_COLORS`/`EPISODE_STATUS_LABELS` constants from duplicated frontend dicts. Replaced N+1 `get_episode()` calls in bulk actions and `delete_episodes()` with batch `get_episodes_by_ids()` query. Removed dead fallback path in `cleanup_old_episodes()`. Simplified URLSearchParams construction in `getEpisodes()`.
+
+### Fixed
+- **0 episodes shown in UI for new feeds**: Episode records are now created on feed refresh rather than only on processing.
+- **Feed history truncated to ~3-4 years**: Hardcoded 100-episode RSS cap raised and made configurable.
+- **Retention deleting discovered episodes**: Retention now skips episodes with no files on disk, eliminating pointless DB churn.
+- **processing_history orphaned by retention**: Episode rows are no longer hard-deleted, so processing_history rows always have a corresponding episode record.
+- **Episode checkboxes outside card boundary on mobile**: Checkboxes now render inside the card at top-left with themed styling matching dark theme. Custom Checkbox component replaces native browser checkboxes.
+- **Inconsistent episode card heights on mobile**: Removed JS `substring(0,150)` truncation that fought CSS `line-clamp-2`. Moved status badge to metadata row to prevent title wrapping.
+- **Edit form (Network/DAI/Feed cap) overflows card on mobile**: Changed to stacked vertical layout with fixed-width labels.
+- **"API Docs" link wraps on narrow Settings page**: Added `whitespace-nowrap` to prevent text breaking.
+
 ## [1.0.40] - 2026-03-06
 
 ### Fixed

@@ -625,3 +625,364 @@ class TestTokenUsage:
         assert model['callCount'] == 1
         assert model['inputCostPerMtok'] == 1.0
         assert model['outputCostPerMtok'] == 5.0
+
+
+class MockStorage:
+    """Mock storage for delete/cleanup tests."""
+    def cleanup_episode_files(self, slug, episode_id):
+        return 1024  # 1KB freed
+
+    def delete_processed_file(self, slug, episode_id):
+        pass
+
+
+class TestBulkUpsertDiscoveredEpisodes:
+    """Tests for bulk_upsert_discovered_episodes."""
+
+    def _make_episode(self, ep_id, title='Test', url='https://example.com/ep.mp3',
+                      episode_number=None, published=None):
+        return {
+            'id': ep_id,
+            'title': title,
+            'url': url,
+            'description': 'desc',
+            'artwork_url': None,
+            'episode_number': episode_number,
+            'published': published or '',
+        }
+
+    def test_bulk_upsert_inserts_new_episodes(self, temp_db):
+        slug = 'bulk-test'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Bulk Test')
+
+        episodes = [self._make_episode(f'ep-{i}') for i in range(3)]
+        count = temp_db.bulk_upsert_discovered_episodes(slug, episodes)
+
+        assert count == 3
+        for i in range(3):
+            ep = temp_db.get_episode(slug, f'ep-{i}')
+            assert ep is not None
+            assert ep['status'] == 'discovered'
+
+    def test_bulk_upsert_does_not_overwrite_existing_status(self, temp_db):
+        slug = 'bulk-no-overwrite'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+
+        temp_db.bulk_upsert_discovered_episodes(slug, [self._make_episode('ep-1')])
+        temp_db.upsert_episode(slug, 'ep-1', status='processed')
+
+        temp_db.bulk_upsert_discovered_episodes(slug, [self._make_episode('ep-1')])
+        ep = temp_db.get_episode(slug, 'ep-1')
+        assert ep['status'] == 'processed'
+
+    def test_bulk_upsert_updates_episode_number(self, temp_db):
+        slug = 'bulk-epnum'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+
+        temp_db.bulk_upsert_discovered_episodes(slug, [self._make_episode('ep-1')])
+        ep = temp_db.get_episode(slug, 'ep-1')
+        assert ep.get('episode_number') is None
+
+        temp_db.bulk_upsert_discovered_episodes(slug, [self._make_episode('ep-1', episode_number=42)])
+        ep = temp_db.get_episode(slug, 'ep-1')
+        assert ep['episode_number'] == 42
+
+    def test_bulk_upsert_nonexistent_slug(self, temp_db):
+        count = temp_db.bulk_upsert_discovered_episodes('no-such-slug', [self._make_episode('ep-1')])
+        assert count == 0
+
+
+class TestGetEpisodesByIds:
+    """Tests for get_episodes_by_ids."""
+
+    def test_get_episodes_by_ids(self, temp_db):
+        slug = 'byids-test'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        for i in range(3):
+            temp_db.upsert_episode(slug, f'ep-{i}', original_url=f'https://example.com/{i}.mp3')
+
+        results = temp_db.get_episodes_by_ids(slug, ['ep-0', 'ep-2'])
+        ids = [r['episode_id'] for r in results]
+        assert len(results) == 2
+        assert 'ep-0' in ids
+        assert 'ep-2' in ids
+
+    def test_get_episodes_by_ids_empty_list(self, temp_db):
+        results = temp_db.get_episodes_by_ids('anything', [])
+        assert results == []
+
+    def test_get_episodes_by_ids_wrong_slug(self, temp_db):
+        slug = 'byids-wrong'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1', original_url='https://example.com/1.mp3')
+
+        results = temp_db.get_episodes_by_ids('nonexistent-slug', ['ep-1'])
+        assert results == []
+
+
+class TestDeleteEpisodes:
+    """Tests for delete_episodes."""
+
+    def test_delete_episodes_resets_to_discovered(self, temp_db):
+        slug = 'del-test'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1',
+                               original_url='https://example.com/1.mp3',
+                               status='processed',
+                               processed_file='/path/to/file.mp3')
+
+        storage = MockStorage()
+        count, freed = temp_db.delete_episodes(slug, ['ep-1'], storage)
+
+        assert count == 1
+        assert freed > 0
+        ep = temp_db.get_episode(slug, 'ep-1')
+        assert ep['status'] == 'discovered'
+        assert ep['processed_file'] is None
+
+    def test_delete_episodes_skips_unprocessed(self, temp_db):
+        slug = 'del-skip'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1',
+                               original_url='https://example.com/1.mp3',
+                               status='discovered')
+
+        storage = MockStorage()
+        count, freed = temp_db.delete_episodes(slug, ['ep-1'], storage)
+        assert count == 0
+        assert freed == 0.0
+
+
+class TestResetEpisodeToDiscovered:
+    """Tests for _reset_episode_to_discovered."""
+
+    def test_reset_clears_all_fields(self, temp_db):
+        slug = 'reset-test'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1',
+                               original_url='https://example.com/1.mp3',
+                               status='processed',
+                               processed_file='/path/to/file.mp3',
+                               original_duration=3600.0,
+                               new_duration=3400.0,
+                               ads_removed=3,
+                               error_message='some error')
+
+        temp_db._reset_episode_to_discovered(slug, 'ep-1')
+
+        ep = temp_db.get_episode(slug, 'ep-1')
+        assert ep['status'] == 'discovered'
+        assert ep['processed_file'] is None
+        assert ep['original_duration'] is None
+        assert ep['new_duration'] is None
+        assert ep['ads_removed'] == 0
+        assert ep['error_message'] is None
+
+
+class TestCleanupOldEpisodes:
+    """Tests for cleanup_old_episodes."""
+
+    def test_cleanup_respects_retention_days(self, temp_db):
+        slug = 'cleanup-ret'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.set_setting('retention_days', '1')
+        temp_db.upsert_episode(slug, 'ep-old',
+                               original_url='https://example.com/1.mp3',
+                               status='processed',
+                               processed_file='/path/file.mp3')
+        # Backdate processed_at to 2 days ago
+        conn = temp_db.get_connection()
+        conn.execute(
+            "UPDATE episodes SET processed_at = datetime('now', '-2 days') WHERE episode_id = 'ep-old'"
+        )
+        conn.commit()
+
+        storage = MockStorage()
+        count, freed = temp_db.cleanup_old_episodes(storage=storage)
+        assert count == 1
+
+    def test_cleanup_skips_recent(self, temp_db):
+        slug = 'cleanup-recent'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.set_setting('retention_days', '30')
+        temp_db.upsert_episode(slug, 'ep-new',
+                               original_url='https://example.com/1.mp3',
+                               status='processed',
+                               processed_file='/path/file.mp3')
+        # Set processed_at to now
+        conn = temp_db.get_connection()
+        conn.execute(
+            "UPDATE episodes SET processed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE episode_id = 'ep-new'"
+        )
+        conn.commit()
+
+        storage = MockStorage()
+        count, freed = temp_db.cleanup_old_episodes(storage=storage)
+        assert count == 0
+
+    def test_cleanup_disabled_when_zero(self, temp_db):
+        slug = 'cleanup-zero'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.set_setting('retention_days', '0')
+        temp_db.upsert_episode(slug, 'ep-1',
+                               original_url='https://example.com/1.mp3',
+                               status='processed',
+                               processed_file='/path/file.mp3')
+
+        storage = MockStorage()
+        count, freed = temp_db.cleanup_old_episodes(storage=storage)
+        assert count == 0
+        assert freed == 0.0
+
+    def test_cleanup_force_all(self, temp_db):
+        slug = 'cleanup-force'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1',
+                               original_url='https://example.com/1.mp3',
+                               status='processed',
+                               processed_file='/path/file.mp3')
+        conn = temp_db.get_connection()
+        conn.execute(
+            "UPDATE episodes SET processed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE episode_id = 'ep-1'"
+        )
+        conn.commit()
+
+        storage = MockStorage()
+        count, freed = temp_db.cleanup_old_episodes(force_all=True, storage=storage)
+        assert count == 1
+
+    def test_cleanup_crashes_without_storage(self, temp_db):
+        with pytest.raises(ValueError, match="storage is required"):
+            temp_db.cleanup_old_episodes()
+
+
+class TestVacuum:
+    """Tests for vacuum."""
+
+    def test_vacuum_returns_duration(self, temp_db):
+        duration = temp_db.vacuum()
+        assert isinstance(duration, int)
+        assert duration >= 0
+
+
+class TestRetentionSettings:
+    """Tests for retention settings."""
+
+    def test_get_set_retention_days(self, temp_db):
+        temp_db.set_setting('retention_days', '45')
+        settings = temp_db.get_all_settings()
+        assert settings['retention_days']['value'] == '45'
+
+
+class TestEpisodeSorting:
+    """Tests for episode sorting."""
+
+    def test_sort_by_episode_number(self, temp_db):
+        slug = 'sort-epnum'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-a', original_url='https://example.com/a.mp3')
+        temp_db.upsert_episode(slug, 'ep-b', original_url='https://example.com/b.mp3')
+        temp_db.upsert_episode(slug, 'ep-c', original_url='https://example.com/c.mp3')
+
+        conn = temp_db.get_connection()
+        conn.execute("UPDATE episodes SET episode_number = 3 WHERE episode_id = 'ep-a'")
+        conn.execute("UPDATE episodes SET episode_number = 1 WHERE episode_id = 'ep-b'")
+        conn.execute("UPDATE episodes SET episode_number = 2 WHERE episode_id = 'ep-c'")
+        conn.commit()
+
+        episodes, total = temp_db.get_episodes(slug, sort_by='episode_number', sort_dir='asc')
+        ep_ids = [e['episode_id'] for e in episodes]
+        assert ep_ids == ['ep-b', 'ep-c', 'ep-a']
+
+    def test_sort_by_published_at(self, temp_db):
+        slug = 'sort-pub'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-old', original_url='https://example.com/old.mp3')
+        temp_db.upsert_episode(slug, 'ep-new', original_url='https://example.com/new.mp3')
+
+        conn = temp_db.get_connection()
+        conn.execute("UPDATE episodes SET published_at = '2025-01-01T00:00:00Z' WHERE episode_id = 'ep-old'")
+        conn.execute("UPDATE episodes SET published_at = '2026-01-01T00:00:00Z' WHERE episode_id = 'ep-new'")
+        conn.commit()
+
+        episodes, total = temp_db.get_episodes(slug, sort_by='published_at', sort_dir='desc')
+        ep_ids = [e['episode_id'] for e in episodes]
+        assert ep_ids[0] == 'ep-new'
+        assert ep_ids[1] == 'ep-old'
+
+    def test_sort_by_invalid_column_defaults_to_created_at(self, temp_db):
+        slug = 'sort-invalid'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1', original_url='https://example.com/1.mp3')
+
+        # Should not crash -- falls back to created_at
+        episodes, total = temp_db.get_episodes(slug, sort_by='bobby_tables; DROP TABLE--', sort_dir='asc')
+        assert total >= 1
+
+
+class TestBatchMethods:
+    """Tests for batch DB methods."""
+
+    def test_batch_clear_episode_details(self, temp_db):
+        slug = 'batch-clear'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1', original_url='https://example.com/1.mp3')
+        temp_db.upsert_episode(slug, 'ep-2', original_url='https://example.com/2.mp3')
+
+        # batch_clear_episode_details should not crash even with no details
+        temp_db.batch_clear_episode_details(slug, ['ep-1', 'ep-2'])
+
+    def test_batch_reset_episodes_to_discovered(self, temp_db):
+        slug = 'batch-reset'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1', original_url='https://example.com/1.mp3',
+                               status='processed', processed_file='/path/1.mp3')
+        temp_db.upsert_episode(slug, 'ep-2', original_url='https://example.com/2.mp3',
+                               status='failed', error_message='oops')
+
+        temp_db.batch_reset_episodes_to_discovered(slug, ['ep-1', 'ep-2'])
+
+        for eid in ['ep-1', 'ep-2']:
+            ep = temp_db.get_episode(slug, eid)
+            assert ep['status'] == 'discovered'
+            assert ep['processed_file'] is None
+            assert ep['error_message'] is None
+
+    def test_batch_set_episodes_pending(self, temp_db):
+        slug = 'batch-pending'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1', original_url='https://example.com/1.mp3',
+                               status='discovered')
+        temp_db.upsert_episode(slug, 'ep-2', original_url='https://example.com/2.mp3',
+                               status='discovered')
+
+        count = temp_db.batch_set_episodes_pending(slug, ['ep-1', 'ep-2'])
+        assert count == 2
+
+        for eid in ['ep-1', 'ep-2']:
+            ep = temp_db.get_episode(slug, eid)
+            assert ep['status'] == 'pending'
+
+    def test_batch_set_episodes_pending_with_reprocess(self, temp_db):
+        slug = 'batch-reprocess'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        temp_db.upsert_episode(slug, 'ep-1', original_url='https://example.com/1.mp3',
+                               status='processed')
+
+        count = temp_db.batch_set_episodes_pending(
+            slug, ['ep-1'],
+            reprocess_mode='full',
+            reprocess_requested_at='2026-01-01T00:00:00Z'
+        )
+        assert count == 1
+        ep = temp_db.get_episode(slug, 'ep-1')
+        assert ep['status'] == 'pending'
+        assert ep['reprocess_mode'] == 'full'
+
+    def test_batch_methods_empty_ids(self, temp_db):
+        slug = 'batch-empty'
+        temp_db.create_podcast(slug, 'https://example.com/feed.xml', 'Test')
+        # Should not crash with empty lists
+        temp_db.batch_clear_episode_details(slug, [])
+        temp_db.batch_reset_episodes_to_discovered(slug, [])
+        assert temp_db.batch_set_episodes_pending(slug, []) == 0
