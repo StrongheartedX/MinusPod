@@ -225,6 +225,9 @@ def reset_ad_detection_settings():
     db.reset_setting('chapters_enabled')
     db.reset_setting('chapters_model')
 
+    db.reset_setting('min_cut_confidence')
+    db.reset_setting('auto_process_enabled')
+
     # Reset LLM provider settings back to env var defaults
     from llm_client import get_llm_client
     db.reset_setting('llm_provider')

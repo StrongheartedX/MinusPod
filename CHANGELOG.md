@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Inline imports in main_app/__init__.py**: Moved `import threading`, `import json`, `import secrets` to top-level; kept `from version import __version__` deferred (path constraint)
 - **Inline `import json as _json` in processing.py**: Moved `json` import to top-level, removed inline alias in `_run_audio_analysis()`
 
+### Smoke Test Fixes
+- **Settings reset missing keys**: `POST /settings/ad-detection/reset` did not reset `min_cut_confidence` or `auto_process_enabled`; added both to `reset_ad_detection_settings()` in `api/settings.py` and to the `defaults` dict in `database/settings.py`
+- **Frontend README stale dependency**: Updated `frontend/README.md` to reference Fetch API instead of removed Axios dependency
+
 ### Refactored
 - **database.py -> database/ package**: Split 4170-line monolith into 12-file package with mixin classes (SchemaMixin, PodcastMixin, EpisodeMixin, SettingsMixin, PatternMixin, SponsorMixin, StatsMixin, MaintenanceMixin, FingerprintMixin, QueueMixin, SearchMixin). All downstream imports preserved.
 - **api.py -> api/ package**: Split 3616-line monolith into 11-file package with Flask Blueprint sub-modules (feeds, episodes, history, settings, system, patterns, sponsors, status, auth, search). All routes preserved.
