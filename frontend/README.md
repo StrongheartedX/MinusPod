@@ -25,7 +25,7 @@ npm run lint
 - **Tailwind CSS 3** - Styling
 - **Lucide React** - Icons
 - **React Router 6** - Routing
-- **Axios** - HTTP client
+- **Fetch API** - HTTP client
 
 ## Project Structure
 
@@ -33,7 +33,7 @@ npm run lint
 src/
 ├── api/              # API client and types
 │   ├── auth.ts       # Authentication endpoints
-│   ├── client.ts     # Base axios wrapper
+│   ├── client.ts     # Base fetch API wrapper
 │   ├── feeds.ts      # Feed/episode endpoints
 │   ├── history.ts    # History endpoints
 │   ├── patterns.ts   # Pattern endpoints

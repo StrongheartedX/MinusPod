@@ -69,6 +69,7 @@ MAX_FALSE_POSITIVE_TEXTS = 100              # Max false positives to load per po
 # Processing Limits
 # ============================================================
 MAX_EPISODE_RETRIES = 3         # Retries before permanent failure
+JIT_RETRY_COOLDOWN_SECONDS = 60 # Base cooldown between JIT retries (doubles per attempt)
 WINDOW_SIZE_SECONDS = 600       # Claude processing window (10 min)
 WINDOW_OVERLAP_SECONDS = 180    # Overlap between windows (3 min)
 MAX_FILE_SIZE_MB = 500          # Maximum audio file size
@@ -115,6 +116,11 @@ AD_CONTENT_PROMO_PHRASES = [
 # ============================================================
 DEFAULT_AD_DURATION_ESTIMATE = 90.0  # Assumed ad length when only intro/outro found
 SPONSOR_MISMATCH_MAX_GAP = 60.0      # Max gap for sponsor mismatch extension
+
+# ============================================================
+# Volume Analysis (DAI ads)
+# ============================================================
+VOLUME_ANOMALY_THRESHOLD_DB = 3.0    # dB deviation from baseline to flag as anomaly
 
 # ============================================================
 # Transition Detection (DAI ads)
@@ -178,6 +184,12 @@ WHISPER_MEMORY_PROFILES = {
     'turbo': (5.0, 0.20),     # ~5GB VRAM (distilled large)
 }
 WHISPER_DEFAULT_PROFILE = (5.0, 0.20)  # Conservative default (medium-like)
+
+# ============================================================
+# Default LLM Models
+# ============================================================
+DEFAULT_AD_DETECTION_MODEL = "claude-sonnet-4-5-20250929"
+DEFAULT_CHAPTERS_MODEL = "claude-haiku-4-5-20251001"
 
 # ============================================================
 # User-Agent Strings
