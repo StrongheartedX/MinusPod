@@ -102,7 +102,7 @@ export type WhisperBackend = 'local' | 'openai-api';
 export interface WhisperApiConfig {
   baseUrl: string;
   apiKey: string;
-  apiKeyConfigured: boolean | undefined;
+  apiKeyConfigured?: boolean;
   model: string;
 }
 
@@ -145,7 +145,7 @@ export interface Settings {
     minCutConfidence: number;
     llmProvider: LlmProvider;
     openaiBaseUrl: string;
-    whisperBackend: string;
+    whisperBackend: WhisperBackend;
     whisperApiBaseUrl: string;
     whisperApiModel: string;
   };

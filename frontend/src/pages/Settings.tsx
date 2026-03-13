@@ -151,7 +151,7 @@ function Settings() {
       whisperApiConfig.apiKey !== '' ||
       whisperApiConfig.model !== (settings.whisperApiModel?.value || 'whisper-1')
     );
-  }, [systemPrompt, verificationPrompt, selectedModel, verificationModel, whisperModel, autoProcessEnabled, audioBitrate, vttTranscriptsEnabled, chaptersEnabled, chaptersModel, minCutConfidence, llmProvider, openaiBaseUrl, whisperBackend, whisperApiConfig, settings]);
+  }, [systemPrompt, verificationPrompt, selectedModel, verificationModel, whisperModel, autoProcessEnabled, audioBitrate, vttTranscriptsEnabled, chaptersEnabled, chaptersModel, minCutConfidence, llmProvider, openaiBaseUrl, whisperBackend, whisperApiConfig.baseUrl, whisperApiConfig.apiKey, whisperApiConfig.model, settings]);
 
   const updateMutation = useMutation({
     mutationFn: () =>

@@ -137,11 +137,9 @@ class TestSettingsEndpoint:
             data=json.dumps({'whisperBackend': 'invalid'}),
             content_type='application/json',
         )
-        assert response.status_code == 200 or response.status_code == 400
-        # If the endpoint returns an error field, check it
+        assert response.status_code == 400
         data = json.loads(response.data)
-        if 'error' in data:
-            assert 'whisperBackend' in data['error']
+        assert 'whisperBackend' in data['error']
 
     def test_reset_whisper_backend_settings(self, app_client):
         """POST /settings/ad-detection/reset resets whisper backend to default."""

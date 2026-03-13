@@ -10,6 +10,7 @@ from api import (
     api, log_request, json_response, error_response,
     get_database, _enrich_models_with_pricing, limiter,
 )
+from config import WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API
 from utils.url import validate_url, validate_base_url, SSRFError
 from webhook_service import render_template_preview, fire_test_event, load_webhooks, VALID_EVENTS
 
@@ -207,7 +208,6 @@ def update_ad_detection_settings():
         get_llm_client(force_new=True)
 
     if 'whisperBackend' in data:
-        from config import WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API
         if data['whisperBackend'] not in (WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API):
             return json_response({'error': 'whisperBackend must be "local" or "openai-api"'}, 400)
         db.set_setting('whisper_backend', data['whisperBackend'], is_default=False)
@@ -227,8 +227,11 @@ def update_ad_detection_settings():
         logger.info("Updated whisper API key")
 
     if 'whisperApiModel' in data:
-        db.set_setting('whisper_api_model', data['whisperApiModel'], is_default=False)
-        logger.info(f"Updated whisper API model to: {data['whisperApiModel']}")
+        model_val = str(data['whisperApiModel']).strip()
+        if not model_val or len(model_val) > 200:
+            return json_response({'error': 'whisperApiModel must be a non-empty string (max 200 chars)'}, 400)
+        db.set_setting('whisper_api_model', model_val, is_default=False)
+        logger.info(f"Updated whisper API model to: {model_val}")
 
     return json_response({'message': 'Settings updated'})
 

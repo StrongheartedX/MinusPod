@@ -273,6 +273,8 @@ def _get_whisper_settings() -> Dict[str, str]:
         'api_model': os.environ.get('WHISPER_API_MODEL', 'whisper-1'),
     }
     try:
+        # Inline import: Database depends on modules that import transcriber,
+        # causing a circular import if placed at module level.
         from database import Database
         db = Database()
         for setting_key, default_key in [
@@ -284,8 +286,8 @@ def _get_whisper_settings() -> Dict[str, str]:
             val = db.get_setting(setting_key)
             if val:
                 defaults[default_key] = val
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not read whisper settings from DB, using env defaults: {e}")
     return defaults
 
 

@@ -1,7 +1,7 @@
 """HTTP retry utilities."""
 import logging
 import time
-from typing import Callable, Optional
+from typing import Optional
 
 import requests
 
@@ -33,14 +33,14 @@ def post_with_retry(
         **kwargs: Passed through to requests.post().
 
     Returns:
-        The successful Response, or None on permanent failure.
+        The successful Response (2xx), or None on permanent failure.
     """
     response = None
     for attempt in range(max_retries):
         try:
             response = requests.post(url, timeout=timeout, **kwargs)
 
-            if response.status_code == 200:
+            if response.ok:
                 return response
 
             if is_retryable_status(response.status_code) and attempt < max_retries - 1:
