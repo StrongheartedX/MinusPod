@@ -15,17 +15,16 @@ services:
       # =================================================================
       # LLM Provider Configuration
       # =================================================================
-      # Option 1: OpenRouter (access 200+ models via one API key)
+      # Option 1: Direct Anthropic API (default, uses API credits)
+      # Set LLM_PROVIDER=anthropic and configure ANTHROPIC_API_KEY
+      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+      # Option 2: OpenRouter (access 200+ models via one API key)
       # Set LLM_PROVIDER=openrouter and configure:
       # - OPENROUTER_API_KEY=sk-or-v1-...
       # - OPENAI_MODEL=anthropic/claude-sonnet-4-5  (or any OpenRouter model ID)
-      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-
-      # Option 2: Direct Anthropic API (uses Anthropic API credits)
-      # Set LLM_PROVIDER=anthropic and configure:
-      # - ANTHROPIC_API_KEY=sk-ant-...
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 
       # Option 3: OpenAI-compatible API (Claude Code wrapper, Ollama, etc.)
       # Set LLM_PROVIDER=openai-compatible and configure:
@@ -36,14 +35,14 @@ services:
       # =================================================================
       # Whisper Configuration
       # =================================================================
-      # Option 1: OpenRouter Whisper API (uses OPENROUTER_API_KEY above)
+      # Option 1: Local Whisper (default, GPU required)
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cuda}
+
+      # Option 2: OpenRouter Whisper API (uses OPENROUTER_API_KEY above)
       # Set WHISPER_BACKEND=openrouter-api to route transcription via OpenRouter
       # - WHISPER_BACKEND=openrouter-api
       # - WHISPER_API_MODEL=openai/whisper-large-v3-turbo  (or any supported model)
-
-      # Option 2: Local Whisper (GPU required)
-      - WHISPER_MODEL=${WHISPER_MODEL:-small}
-      - WHISPER_DEVICE=${WHISPER_DEVICE:-cuda}
 
       # Option 3: External OpenAI-compatible Whisper API (Groq, OpenAI, whisper.cpp)
       # - WHISPER_BACKEND=openai-api

@@ -187,6 +187,7 @@ function Settings() {
         ...(openrouterApiKey ? { openrouterApiKey } : {}),
       }),
     onSuccess: () => {
+      setOpenrouterApiKey('');
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['models'] });
     },
