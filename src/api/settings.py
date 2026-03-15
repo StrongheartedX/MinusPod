@@ -10,7 +10,7 @@ from api import (
     api, log_request, json_response, error_response,
     get_database, _enrich_models_with_pricing, limiter,
 )
-from config import WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API, WHISPER_BACKEND_OPENROUTER, OPENROUTER_BASE_URL
+from config import WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API, OPENROUTER_BASE_URL
 from llm_client import (
     get_effective_provider, get_effective_base_url, get_api_key, get_effective_openrouter_api_key,
     get_llm_client,
@@ -232,17 +232,13 @@ def update_ad_detection_settings():
         get_llm_client(force_new=True)
 
     if 'whisperBackend' in data:
-        valid_whisper_backends = (WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API, WHISPER_BACKEND_OPENROUTER)
+        valid_whisper_backends = (WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API)
         if data['whisperBackend'] not in valid_whisper_backends:
             return json_response(
                 {'error': f'whisperBackend must be one of: {", ".join(valid_whisper_backends)}'}, 400
             )
         db.set_setting('whisper_backend', data['whisperBackend'], is_default=False)
         logger.info(f"Updated whisper backend to: {data['whisperBackend']}")
-        # Clear API URL/key when switching to openrouter-api (auto-populated from LLM config)
-        if data['whisperBackend'] == WHISPER_BACKEND_OPENROUTER:
-            db.reset_setting('whisper_api_base_url')
-            db.reset_setting('whisper_api_key')
 
     if 'whisperApiBaseUrl' in data:
         if data['whisperApiBaseUrl']:

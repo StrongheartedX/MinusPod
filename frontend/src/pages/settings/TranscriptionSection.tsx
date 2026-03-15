@@ -35,7 +35,6 @@ function TranscriptionSection({
           >
             <option value={WHISPER_BACKENDS.LOCAL}>Local (faster-whisper)</option>
             <option value={WHISPER_BACKENDS.OPENAI_API}>Remote API (OpenAI-compatible)</option>
-            <option value={WHISPER_BACKENDS.OPENROUTER_API}>OpenRouter API</option>
           </select>
         </div>
 
@@ -67,61 +66,51 @@ function TranscriptionSection({
           </div>
         )}
 
-        {whisperBackend === WHISPER_BACKENDS.OPENROUTER_API && (
-          <p className="text-sm text-muted-foreground">
-            Uses your OpenRouter API key and endpoint. Override the model below if needed.
-          </p>
-        )}
-
-        {(whisperBackend === WHISPER_BACKENDS.OPENAI_API || whisperBackend === WHISPER_BACKENDS.OPENROUTER_API) && (
+        {whisperBackend === WHISPER_BACKENDS.OPENAI_API && (
           <>
-            {whisperBackend === WHISPER_BACKENDS.OPENAI_API && (
-              <>
-                <div>
-                  <label htmlFor="whisperApiBaseUrl" className="block text-sm font-medium text-foreground mb-2">
-                    API Base URL
-                  </label>
-                  <input
-                    type="text"
-                    id="whisperApiBaseUrl"
-                    value={apiConfig.baseUrl}
-                    onChange={(e) => onApiConfigChange('baseUrl', e.target.value)}
-                    placeholder="http://host.docker.internal:8765/v1"
-                    className="w-full px-4 py-2 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm"
-                  />
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    OpenAI-compatible transcription endpoint (e.g. whisper.cpp, Groq, OpenAI)
-                  </p>
-                </div>
+            <div>
+              <label htmlFor="whisperApiBaseUrl" className="block text-sm font-medium text-foreground mb-2">
+                API Base URL
+              </label>
+              <input
+                type="text"
+                id="whisperApiBaseUrl"
+                value={apiConfig.baseUrl}
+                onChange={(e) => onApiConfigChange('baseUrl', e.target.value)}
+                placeholder="http://host.docker.internal:8765/v1"
+                className="w-full px-4 py-2 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm"
+              />
+              <p className="mt-1 text-sm text-muted-foreground">
+                OpenAI-compatible transcription endpoint (e.g. whisper.cpp, Groq, OpenAI)
+              </p>
+            </div>
 
-                <div>
-                  <label htmlFor="whisperApiKey" className="block text-sm font-medium text-foreground mb-2">
-                    API Key
-                  </label>
-                  <input
-                    type="password"
-                    id="whisperApiKey"
-                    value={apiConfig.apiKey}
-                    onChange={(e) => onApiConfigChange('apiKey', e.target.value)}
-                    placeholder={apiConfig.apiKeyConfigured ? '(configured - enter new value to change)' : '(optional - leave blank if not required)'}
-                    className="w-full px-4 py-2 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm"
-                  />
-                  <div className="mt-1">
-                    {apiConfig.apiKeyConfigured ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-600 dark:text-green-400">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                        Configured
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground">
-                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
-                        Not configured (optional for local servers)
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
+            <div>
+              <label htmlFor="whisperApiKey" className="block text-sm font-medium text-foreground mb-2">
+                API Key
+              </label>
+              <input
+                type="password"
+                id="whisperApiKey"
+                value={apiConfig.apiKey}
+                onChange={(e) => onApiConfigChange('apiKey', e.target.value)}
+                placeholder={apiConfig.apiKeyConfigured ? '(configured - enter new value to change)' : '(optional - leave blank if not required)'}
+                className="w-full px-4 py-2 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm"
+              />
+              <div className="mt-1">
+                {apiConfig.apiKeyConfigured ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-600 dark:text-green-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    Configured
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground">
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
+                    Not configured (optional for local servers)
+                  </span>
+                )}
+              </div>
+            </div>
 
             <div>
               <label htmlFor="whisperApiModel" className="block text-sm font-medium text-foreground mb-2">

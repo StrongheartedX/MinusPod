@@ -97,7 +97,7 @@ export interface SettingValueNumber {
 }
 
 export type LlmProvider = 'anthropic' | 'openai-compatible' | 'ollama' | 'openrouter';
-export type WhisperBackend = 'local' | 'openai-api' | 'openrouter-api';
+export type WhisperBackend = 'local' | 'openai-api';
 
 export interface WhisperApiConfig {
   baseUrl: string;
@@ -116,7 +116,6 @@ export const LLM_PROVIDERS = {
 export const WHISPER_BACKENDS = {
   LOCAL: 'local' as const,
   OPENAI_API: 'openai-api' as const,
-  OPENROUTER_API: 'openrouter-api' as const,
 };
 
 export interface Settings {

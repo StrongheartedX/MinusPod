@@ -161,7 +161,7 @@ Audio analysis runs automatically on every episode (lightweight, uses only ffmpe
 
 ## Requirements
 
-- Docker with NVIDIA GPU support (for local Whisper), **or** a [remote Whisper backend](#remote-whisper-transcription) / [OpenRouter API](#using-openrouter) (no GPU needed)
+- Docker with NVIDIA GPU support (for local Whisper), **or** a [remote Whisper backend](#remote-whisper-transcription) (no GPU needed)
 - Anthropic API key, [OpenRouter](https://openrouter.ai) API key, **or** [Ollama](https://ollama.com) for local inference
 
 ### Memory Requirements
@@ -345,7 +345,7 @@ This is a comma-separated list of domains excluded from Audiobookshelf's SSRF fi
 | `UI_BASE_URL` | _(falls back to BASE_URL)_ | Public URL for UI links in webhooks (set if UI is on a different domain than feeds) |
 | `WHISPER_MODEL` | `small` | Whisper model size (tiny/base/small/medium/large) |
 | `WHISPER_DEVICE` | `cuda` | Device for Whisper (cuda/cpu). Set to `cpu` when using API backend to skip GPU init. |
-| `WHISPER_BACKEND` | `local` | Whisper backend: `local` (faster-whisper), `openai-api` (remote HTTP), or `openrouter-api` |
+| `WHISPER_BACKEND` | `local` | Whisper backend: `local` (faster-whisper) or `openai-api` (remote HTTP) |
 | `WHISPER_API_BASE_URL` | _(none)_ | Base URL for OpenAI-compatible whisper API (e.g. `http://host.docker.internal:8765/v1`) |
 | `WHISPER_API_KEY` | _(none)_ | API key for whisper API (optional for local servers) |
 | `WHISPER_API_MODEL` | `whisper-1` | Model name sent to whisper API |
@@ -595,7 +595,7 @@ All settings can also be configured via the Settings UI under the Transcription 
 
 ## Using OpenRouter
 
-[OpenRouter](https://openrouter.ai) is a unified API that routes to 200+ models (Claude, GPT, Gemini, open-weights) with one API key. It also supports Whisper transcription, so you can run MinusPod without an NVIDIA GPU.
+[OpenRouter](https://openrouter.ai) is a unified API that routes to 200+ models (Claude, GPT, Gemini, open-weights) with one API key. OpenRouter is supported as an **LLM provider only** -- it does not support the `/v1/audio/transcriptions` endpoint required for Whisper transcription. For transcription without a GPU, use a [remote Whisper backend](#remote-whisper-transcription) such as Groq.
 
 ### Setup
 
@@ -606,7 +606,7 @@ All settings can also be configured via the Settings UI under the Transcription 
 # Create .env
 echo "OPENROUTER_API_KEY=sk-or-v1-your-key-here" > .env
 
-# Start (no GPU required)
+# Start
 docker compose -f docker-compose.openrouter.yml up -d
 ```
 
@@ -615,16 +615,6 @@ Or add OpenRouter to an existing setup:
 ```bash
 LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
-```
-
-### Whisper via OpenRouter
-
-To skip local GPU transcription entirely, point Whisper at OpenRouter too:
-
-```bash
-WHISPER_BACKEND=openrouter-api
-WHISPER_API_MODEL=openai/whisper-large-v3-turbo
-WHISPER_DEVICE=cpu
 ```
 
 ### Model Selection

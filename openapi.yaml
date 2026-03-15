@@ -12,7 +12,7 @@ info:
     - Monitor system status and trigger cleanup operations
     - Manage cross-episode ad patterns with network and podcast scope
     - Submit corrections to improve ad detection accuracy
-  version: 1.0.67
+  version: 1.0.68
   contact:
     name: MinusPod
   license:
@@ -2135,8 +2135,8 @@ paths:
                   example: small
                 whisperBackend:
                   type: string
-                  description: Whisper backend to use (local uses local GPU/CPU, openai-api uses an external API, openrouter-api uses OpenRouter)
-                  enum: [local, openai-api, openrouter-api]
+                  description: Whisper backend to use (local uses local GPU/CPU, openai-api uses an external OpenAI-compatible API)
+                  enum: [local, openai-api]
                   example: local
                 whisperApiBaseUrl:
                   type: string
@@ -3191,7 +3191,7 @@ components:
           properties:
             value:
               type: string
-              description: Whisper backend to use (local, openai-api, openrouter-api)
+              description: Whisper backend to use (local, openai-api)
             isDefault:
               type: boolean
         whisperApiBaseUrl:

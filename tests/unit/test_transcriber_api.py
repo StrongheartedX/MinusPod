@@ -3,13 +3,11 @@ import os
 import tempfile
 from unittest.mock import patch, MagicMock
 
-from transcriber import Transcriber, _get_whisper_settings, calculate_optimal_chunk_duration
+from transcriber import Transcriber, _get_whisper_settings, calculate_optimal_chunk_duration, _LEGACY_BACKEND_OPENROUTER
 from config import (
     API_CHUNK_DURATION_SECONDS,
-    API_CHUNK_DURATION_SECONDS_OPENROUTER,
     WHISPER_BACKEND_LOCAL,
     WHISPER_BACKEND_API,
-    WHISPER_BACKEND_OPENROUTER,
 )
 
 
@@ -74,18 +72,18 @@ class TestGetWhisperSettings:
         assert settings['api_model'] == 'model-x'
 
 
-    def test_openrouter_auto_populates_base_url_and_key(self):
+    def test_openrouter_backend_falls_back_to_local(self):
+        """Legacy openrouter-api backend in DB should gracefully fall back to local and write back."""
         mock_db = _mock_db_with_settings({
-            'whisper_backend': WHISPER_BACKEND_OPENROUTER,
+            'whisper_backend': _LEGACY_BACKEND_OPENROUTER,
             'whisper_api_model': 'openai/whisper-large-v3-turbo',
         })
-        with patch('database.Database', return_value=mock_db), \
-             patch('transcriber.get_effective_openrouter_api_key', return_value='sk-or-test'):
+        with patch('database.Database', return_value=mock_db):
             settings = _get_whisper_settings()
-        assert settings['backend'] == WHISPER_BACKEND_OPENROUTER
-        assert 'openrouter.ai' in settings['api_base_url']
-        assert settings['api_key'] == 'sk-or-test'
-        assert settings['api_model'] == 'openai/whisper-large-v3-turbo'
+        assert settings['backend'] == WHISPER_BACKEND_LOCAL
+        mock_db.set_setting.assert_called_once_with(
+            'whisper_backend', WHISPER_BACKEND_LOCAL, is_default=False
+        )
 
 
 class TestApiChunkDuration:
@@ -97,13 +95,6 @@ class TestApiChunkDuration:
         )
         assert duration == API_CHUNK_DURATION_SECONDS
         assert 'API backend' in reason
-
-    def test_returns_openrouter_chunk_duration(self):
-        duration, reason = calculate_optimal_chunk_duration(
-            'small', 'cuda', whisper_backend=WHISPER_BACKEND_OPENROUTER
-        )
-        assert duration == API_CHUNK_DURATION_SECONDS_OPENROUTER
-        assert 'OpenRouter' in reason
 
     @patch('transcriber.get_available_memory_gb', return_value=(8.0, 'GPU'))
     def test_returns_memory_based_for_local(self, mock_mem):

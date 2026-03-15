@@ -16,11 +16,8 @@ from utils.http import post_with_retry
 from utils.url import validate_url, SSRFError
 from config import (
     API_CHUNK_DURATION_SECONDS,
-    API_CHUNK_DURATION_SECONDS_OPENROUTER,
-    OPENROUTER_BASE_URL,
     WHISPER_BACKEND_LOCAL,
     WHISPER_BACKEND_API,
-    WHISPER_BACKEND_OPENROUTER,
     CHUNK_OVERLAP_SECONDS,
     CHUNK_MIN_DURATION_SECONDS,
     CHUNK_MAX_DURATION_SECONDS,
@@ -30,7 +27,6 @@ from config import (
     WHISPER_DEFAULT_PROFILE,
     BROWSER_USER_AGENT, APP_USER_AGENT,
 )
-from llm_client import get_effective_openrouter_api_key
 
 # Suppress ONNX Runtime warnings before importing faster_whisper
 os.environ.setdefault('ORT_LOG_LEVEL', 'ERROR')
@@ -46,6 +42,10 @@ import ctranslate2
 from faster_whisper import WhisperModel, BatchedInferencePipeline
 
 logger = logging.getLogger(__name__)
+
+# Legacy backend identifier for graceful DB migration (removed in v1.0.68)
+_LEGACY_BACKEND_OPENROUTER = 'openrouter-api'
+_openrouter_migration_warned = False
 
 # Maximum segment duration for precise ad detection
 MAX_SEGMENT_DURATION = 15.0  # seconds
@@ -269,8 +269,6 @@ def _get_whisper_settings() -> Dict[str, str]:
     """Read all whisper backend settings from DB with env var fallbacks.
 
     Returns a dict with keys: backend, api_base_url, api_key, api_model.
-    For the 'openrouter-api' backend, api_base_url and api_key are
-    auto-populated from OpenRouter config if not explicitly set.
     """
     defaults = {
         'backend': os.environ.get('WHISPER_BACKEND', WHISPER_BACKEND_LOCAL),
@@ -292,15 +290,29 @@ def _get_whisper_settings() -> Dict[str, str]:
             val = db.get_setting(setting_key)
             if val:
                 defaults[default_key] = val
+
+        # Graceful migration: openrouter-api whisper backend was removed in v1.0.68.
+        # Write the corrected value back so the fallback only runs once.
+        if defaults['backend'] == _LEGACY_BACKEND_OPENROUTER:
+            global _openrouter_migration_warned
+            if not _openrouter_migration_warned:
+                logger.warning(
+                    "OpenRouter Whisper backend is no longer supported (endpoint does not exist). "
+                    "Falling back to local whisper."
+                )
+                _openrouter_migration_warned = True
+            defaults['backend'] = WHISPER_BACKEND_LOCAL
+            db.set_setting('whisper_backend', WHISPER_BACKEND_LOCAL, is_default=False)
     except Exception as e:
         logger.warning(f"Could not read whisper settings from DB, using env defaults: {e}")
 
-    # Auto-populate OpenRouter connection details when using the openrouter-api backend
-    if defaults['backend'] == WHISPER_BACKEND_OPENROUTER:
-        if not defaults['api_base_url']:
-            defaults['api_base_url'] = OPENROUTER_BASE_URL
-        if not defaults['api_key']:
-            defaults['api_key'] = get_effective_openrouter_api_key() or ''
+    # Handle env-var-sourced legacy value (no DB to write back to)
+    if defaults['backend'] == _LEGACY_BACKEND_OPENROUTER:
+        logger.warning(
+            "WHISPER_BACKEND=openrouter-api is no longer supported. Falling back to local whisper. "
+            "Update your environment variable to WHISPER_BACKEND=local or WHISPER_BACKEND=openai-api."
+        )
+        defaults['backend'] = WHISPER_BACKEND_LOCAL
 
     return defaults
 
@@ -318,14 +330,12 @@ def calculate_optimal_chunk_duration(
     Args:
         model_name: Whisper model name (e.g., "small", "large-v3")
         device: "cuda" or "cpu"
-        whisper_backend: "local", "openai-api", or "openrouter-api"
+        whisper_backend: "local" or "openai-api"
 
     Returns:
         Tuple of (chunk_duration_seconds, reasoning_message)
     """
     # For remote backends, memory is irrelevant - use fixed duration caps
-    if whisper_backend == WHISPER_BACKEND_OPENROUTER:
-        return API_CHUNK_DURATION_SECONDS_OPENROUTER, "OpenRouter backend (2.5-min chunks for payload size limit)"
     if whisper_backend == WHISPER_BACKEND_API:
         return API_CHUNK_DURATION_SECONDS, "API backend (fixed 10-min chunks for 25MB limit)"
 
@@ -991,7 +1001,7 @@ class Transcriber:
         """
         # Check whisper backend setting
         whisper_settings = _get_whisper_settings()
-        if whisper_settings['backend'] in (WHISPER_BACKEND_API, WHISPER_BACKEND_OPENROUTER):
+        if whisper_settings['backend'] == WHISPER_BACKEND_API:
             return self._transcribe_via_api(audio_path, podcast_name, whisper_settings)
 
         preprocessed_path = None

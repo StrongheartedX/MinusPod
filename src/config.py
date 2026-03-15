@@ -161,13 +161,10 @@ CHUNK_DEFAULT_DURATION_SECONDS = 1800  # Default if memory detection fails (30 m
 
 # API backend chunk duration (10 min = ~19MB WAV, under 25MB OpenAI API limit)
 API_CHUNK_DURATION_SECONDS = 600
-# OpenRouter runs on Vercel with a 4.5MB payload limit; 2.5 min keeps FLAC under 4MB
-API_CHUNK_DURATION_SECONDS_OPENROUTER = 150
 
 # Whisper backend identifiers
 WHISPER_BACKEND_LOCAL = 'local'
 WHISPER_BACKEND_API = 'openai-api'
-WHISPER_BACKEND_OPENROUTER = 'openrouter-api'
 
 # OpenRouter API
 OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
