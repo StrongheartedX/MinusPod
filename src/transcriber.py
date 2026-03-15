@@ -1044,10 +1044,13 @@ class Transcriber:
 
                     # Use the batched pipeline for transcription
                     # word_timestamps=True enables precise boundary refinement later
-                    # language=None enables auto-detection to catch non-English DAI ads
+                    # language='en' prevents Whisper from misdetecting language on
+                    # music intros or sound effects (e.g. English podcast detected as
+                    # Spanish at 93% confidence). Non-English DAI ads are still caught
+                    # by _detect_non_english_segment() text heuristics downstream.
                     segments_generator, info = model.transcribe(
                         transcribe_path,
-                        language=None,  # Auto-detect to catch non-English ads (Spanish, etc.)
+                        language='en',
                         initial_prompt=initial_prompt,
                         beam_size=5,
                         batch_size=batch_size,

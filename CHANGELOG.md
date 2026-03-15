@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.69] - 2026-03-15
+
+### Fixed
+- **Whisper language misdetection**: Local Whisper backend used `language=None` (auto-detect) which misidentified English podcasts as Spanish (93% confidence on music intros), corrupting transcriptions and generating false ad detections. Now uses `language='en'` matching the API backend. Non-English DAI ads are still caught by text-based heuristics.
+- **Ad detection crash on empty LLM response**: When the LLM returns `None` content (empty response, refusal, or content filtering), `ad_detector.py` crashed with `object of type 'NoneType' has no len()`. Both Anthropic and OpenAI-compatible `messages_create` now coerce `None` content to empty string.
+
 ## [1.0.68] - 2026-03-15
 
 ### Removed

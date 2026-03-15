@@ -303,7 +303,7 @@ class AnthropicClient(LLMClient):
             timeout=timeout
         )
 
-        content = response.content[0].text if response.content else ""
+        content = (response.content[0].text or "") if response.content else ""
 
         llm_response = LLMResponse(
             content=content,
@@ -464,7 +464,7 @@ class OpenAICompatibleClient(LLMClient):
             if reasoning:
                 logger.debug(f"LLM reasoning field present ({len(str(reasoning))} chars)")
 
-        content = response.choices[0].message.content if response.choices else ""
+        content = (response.choices[0].message.content or "") if response.choices else ""
 
         llm_response = LLMResponse(
             content=content,
