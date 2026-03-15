@@ -28,6 +28,16 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Any
 
+from config import (
+    LLM_TIMEOUT_DEFAULT,
+    LLM_TIMEOUT_LOCAL,
+    LLM_RETRY_MAX_RETRIES,
+    LLM_RETRY_MAX_RETRIES_LOCAL,
+    OPENROUTER_BASE_URL,
+    OPENROUTER_HTTP_REFERER,
+    OPENROUTER_APP_TITLE,
+)
+
 logger = logging.getLogger(__name__)
 io_logger = logging.getLogger('podcast.llm_io')
 
@@ -152,7 +162,11 @@ def get_effective_base_url() -> str:
 
 
 def get_effective_openrouter_api_key() -> Optional[str]:
-    """Return the OpenRouter API key, checking DB first then env var."""
+    """Return the OpenRouter API key, checking DB first then env var.
+
+    Note: DB reset stores '' (empty string) which is intentionally falsy
+    so we fall through to the env var.  Do not change to ``is not None``.
+    """
     db_val = _get_cached_setting('openrouter_api_key')
     if db_val:
         return db_val
@@ -575,7 +589,6 @@ def get_llm_timeout() -> float:
     get a longer timeout since inference may be on-device or routed through
     a wrapper and significantly slower than the direct Anthropic API.
     """
-    from config import LLM_TIMEOUT_DEFAULT, LLM_TIMEOUT_LOCAL
     provider = get_effective_provider()
     if provider in (PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER):
         return LLM_TIMEOUT_DEFAULT
@@ -588,7 +601,6 @@ def get_llm_max_retries() -> int:
     Non-Anthropic providers (except OpenRouter) use fewer retries since
     each attempt may be slower than the direct Anthropic API.
     """
-    from config import LLM_RETRY_MAX_RETRIES, LLM_RETRY_MAX_RETRIES_LOCAL
     provider = get_effective_provider()
     if provider in (PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER):
         return LLM_RETRY_MAX_RETRIES
@@ -703,7 +715,6 @@ def get_llm_client(force_new: bool = False) -> LLMClient:
     if provider == PROVIDER_ANTHROPIC:
         _cached_client = AnthropicClient()
     elif provider == PROVIDER_OPENROUTER:
-        from config import OPENROUTER_BASE_URL, OPENROUTER_HTTP_REFERER, OPENROUTER_APP_TITLE
         api_key = get_effective_openrouter_api_key() or 'not-needed'
         _cached_client = OpenAICompatibleClient(
             base_url=OPENROUTER_BASE_URL,
@@ -746,17 +757,18 @@ def get_api_key() -> Optional[str]:
         return os.environ.get('OPENAI_API_KEY', os.environ.get('ANTHROPIC_API_KEY', 'not-needed'))
 
 
-def _verify_endpoint(base_url: str, label: str) -> bool:
+def _verify_endpoint(label: str) -> bool:
     """Verify that an LLM endpoint is reachable via verify_connection."""
-    logger.info(f"Verifying LLM endpoint: {base_url}")
     try:
         client = get_llm_client(force_new=True)
+        actual_url = getattr(client, 'base_url', 'unknown')
+        logger.info(f"Verifying LLM endpoint: {actual_url}")
         if hasattr(client, 'verify_connection'):
             if not client.verify_connection(timeout=10.0):
-                logger.error(f"LLM endpoint unreachable: {base_url}")
+                logger.error(f"LLM endpoint unreachable: {actual_url}")
                 logger.error("Ad detection and chapter generation will fail until this is resolved")
                 return False
-        logger.info(f"LLM provider: {label} (verified, endpoint: {base_url})")
+        logger.info(f"LLM provider: {label} (verified, endpoint: {actual_url})")
         return True
     except Exception as e:
         logger.error(f"{label} endpoint verification failed: {e}")
@@ -766,9 +778,9 @@ def _verify_endpoint(base_url: str, label: str) -> bool:
 def verify_llm_connection() -> bool:
     """Verify the LLM endpoint is reachable at startup.
 
-    For openai-compatible providers (including Ollama), this makes a test
-    request to verify the endpoint is accessible -- no API key is required.
-    For Anthropic, this just verifies the API key is set.
+    For OpenRouter and openai-compatible providers (including Ollama),
+    delegates to _verify_endpoint which tests endpoint connectivity.
+    For Anthropic, just verifies the API key is set.
 
     Returns:
         True if verification passed, False otherwise
@@ -776,21 +788,13 @@ def verify_llm_connection() -> bool:
     provider = get_effective_provider()
 
     if provider == PROVIDER_OPENROUTER:
-        from config import OPENROUTER_BASE_URL
         api_key = get_effective_openrouter_api_key()
         if not api_key:
             logger.warning("No OPENROUTER_API_KEY configured - ad detection and chapter generation will be disabled")
             return False
-        if not _verify_endpoint(OPENROUTER_BASE_URL, 'openrouter'):
-            return False
-        return True
+        return _verify_endpoint('openrouter')
     elif provider in PROVIDERS_NON_ANTHROPIC:
-        base_url = get_effective_base_url()
-        if provider == PROVIDER_OLLAMA and not base_url.rstrip('/').endswith('/v1'):
-            base_url = base_url.rstrip('/') + '/v1'
-        if not _verify_endpoint(base_url, provider):
-            return False
-        return True
+        return _verify_endpoint(provider)
     else:
         # For Anthropic, verify API key is present
         api_key = get_api_key()

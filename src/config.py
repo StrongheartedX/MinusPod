@@ -159,8 +159,10 @@ CHUNK_MIN_DURATION_SECONDS = 300     # Minimum chunk size (5 minutes)
 CHUNK_MAX_DURATION_SECONDS = 3600    # Maximum chunk size (60 minutes)
 CHUNK_DEFAULT_DURATION_SECONDS = 1800  # Default if memory detection fails (30 minutes)
 
-# API backend chunk duration (10 min = ~19MB WAV, under 25MB API limit)
+# API backend chunk duration (10 min = ~19MB WAV, under 25MB OpenAI API limit)
 API_CHUNK_DURATION_SECONDS = 600
+# OpenRouter runs on Vercel with a 4.5MB payload limit; 2.5 min keeps FLAC under 4MB
+API_CHUNK_DURATION_SECONDS_OPENROUTER = 150
 
 # Whisper backend identifiers
 WHISPER_BACKEND_LOCAL = 'local'

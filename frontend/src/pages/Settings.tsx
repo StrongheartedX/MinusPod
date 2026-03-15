@@ -269,7 +269,10 @@ function Settings() {
         apiKeyConfigured={settings?.apiKeyConfigured}
         openrouterApiKey={openrouterApiKey}
         openrouterApiKeyConfigured={settings?.openrouterApiKeyConfigured}
-        onProviderChange={setLlmProvider}
+        onProviderChange={(p) => {
+          setLlmProvider(p);
+          if (p !== LLM_PROVIDERS.OPENROUTER) setOpenrouterApiKey('');
+        }}
         onBaseUrlChange={setOpenaiBaseUrl}
         onOpenrouterApiKeyChange={setOpenrouterApiKey}
       />

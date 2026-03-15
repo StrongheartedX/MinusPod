@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.67] - 2026-03-15
+
+### Fixed
+- **OpenRouter Whisper 413 errors**: Reduced chunk duration from 10 min (600s) to 2.5 min (150s) for OpenRouter backend to stay under payload size limit. OpenAI API backend unchanged at 600s.
+- **`_verify_endpoint` logged misleading URL**: Removed unused `base_url` parameter; now reads the actual URL from the client after construction.
+- **OpenRouter API key format validation**: Settings API now rejects keys that do not start with `sk-or-`.
+- **Frontend: OpenRouter key sent after provider switch**: Clearing `openrouterApiKey` state when switching away from OpenRouter prevents stale key from being saved.
+
+### Added
+- Tests for OpenRouter whisper settings auto-population and chunk duration calculation.
+
 ## [1.0.66] - 2026-03-15
 
 ### Fixed

@@ -16,6 +16,8 @@ from utils.http import post_with_retry
 from utils.url import validate_url, SSRFError
 from config import (
     API_CHUNK_DURATION_SECONDS,
+    API_CHUNK_DURATION_SECONDS_OPENROUTER,
+    OPENROUTER_BASE_URL,
     WHISPER_BACKEND_LOCAL,
     WHISPER_BACKEND_API,
     WHISPER_BACKEND_OPENROUTER,
@@ -28,6 +30,7 @@ from config import (
     WHISPER_DEFAULT_PROFILE,
     BROWSER_USER_AGENT, APP_USER_AGENT,
 )
+from llm_client import get_effective_openrouter_api_key
 
 # Suppress ONNX Runtime warnings before importing faster_whisper
 os.environ.setdefault('ORT_LOG_LEVEL', 'ERROR')
@@ -295,10 +298,8 @@ def _get_whisper_settings() -> Dict[str, str]:
     # Auto-populate OpenRouter connection details when using the openrouter-api backend
     if defaults['backend'] == WHISPER_BACKEND_OPENROUTER:
         if not defaults['api_base_url']:
-            from config import OPENROUTER_BASE_URL
             defaults['api_base_url'] = OPENROUTER_BASE_URL
         if not defaults['api_key']:
-            from llm_client import get_effective_openrouter_api_key
             defaults['api_key'] = get_effective_openrouter_api_key() or ''
 
     return defaults
@@ -317,13 +318,15 @@ def calculate_optimal_chunk_duration(
     Args:
         model_name: Whisper model name (e.g., "small", "large-v3")
         device: "cuda" or "cpu"
-        whisper_backend: "local" or "openai-api"
+        whisper_backend: "local", "openai-api", or "openrouter-api"
 
     Returns:
         Tuple of (chunk_duration_seconds, reasoning_message)
     """
-    # For API/OpenRouter backends, memory is irrelevant - use fixed cap
-    if whisper_backend in (WHISPER_BACKEND_API, WHISPER_BACKEND_OPENROUTER):
+    # For remote backends, memory is irrelevant - use fixed duration caps
+    if whisper_backend == WHISPER_BACKEND_OPENROUTER:
+        return API_CHUNK_DURATION_SECONDS_OPENROUTER, "OpenRouter backend (2.5-min chunks for payload size limit)"
+    if whisper_backend == WHISPER_BACKEND_API:
         return API_CHUNK_DURATION_SECONDS, "API backend (fixed 10-min chunks for 25MB limit)"
 
     # Get model memory profile

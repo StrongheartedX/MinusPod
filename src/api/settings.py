@@ -221,7 +221,10 @@ def update_ad_detection_settings():
         provider_changed = True
 
     if 'openrouterApiKey' in data:
-        db.set_setting('openrouter_api_key', data['openrouterApiKey'], is_default=False)
+        key = data['openrouterApiKey'].strip()
+        if key and not key.startswith('sk-or-'):
+            return json_response({'error': 'OpenRouter API key must start with sk-or-'}, 400)
+        db.set_setting('openrouter_api_key', key, is_default=False)
         logger.info("Updated OpenRouter API key")
         provider_changed = True
 
