@@ -112,5 +112,69 @@ class TestGetLlmClientOpenRouter(unittest.TestCase):
         llm_client._cached_client = None
 
 
+class TestModelMatchesProviderOpenRouter(unittest.TestCase):
+    """Verify OpenRouter accepts any model, while Anthropic still filters."""
+
+    def test_openrouter_accepts_claude_model(self):
+        from llm_client import model_matches_provider, PROVIDER_OPENROUTER
+        self.assertTrue(model_matches_provider('anthropic/claude-sonnet-4-5', PROVIDER_OPENROUTER))
+
+    def test_openrouter_accepts_non_claude_model(self):
+        from llm_client import model_matches_provider, PROVIDER_OPENROUTER
+        self.assertTrue(model_matches_provider('openai/gpt-4o', PROVIDER_OPENROUTER))
+
+    def test_anthropic_rejects_non_claude_model(self):
+        from llm_client import model_matches_provider, PROVIDER_ANTHROPIC
+        self.assertFalse(model_matches_provider('openai/gpt-4o', PROVIDER_ANTHROPIC))
+
+    def test_anthropic_accepts_claude_model(self):
+        from llm_client import model_matches_provider, PROVIDER_ANTHROPIC
+        self.assertTrue(model_matches_provider('claude-sonnet-4-5-20250514', PROVIDER_ANTHROPIC))
+
+
+class TestVerifyLlmConnectionOpenRouter(unittest.TestCase):
+    """Verify that OpenRouter startup verification calls verify_connection."""
+
+    @patch('llm_client.get_llm_client')
+    @patch('llm_client.get_effective_openrouter_api_key', return_value='sk-or-key')
+    @patch('llm_client.get_effective_provider', return_value='openrouter')
+    def test_calls_verify_connection_when_key_set(self, _prov, _key, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = True
+        mock_get_client.return_value = mock_client
+
+        from llm_client import verify_llm_connection
+        result = verify_llm_connection()
+
+        self.assertTrue(result)
+        mock_client.verify_connection.assert_called_once_with(timeout=10.0)
+
+    @patch('llm_client.get_effective_openrouter_api_key', return_value=None)
+    @patch('llm_client.get_effective_provider', return_value='openrouter')
+    def test_returns_false_when_no_key(self, _prov, _key):
+        from llm_client import verify_llm_connection
+        self.assertFalse(verify_llm_connection())
+
+    @patch('llm_client.get_llm_client')
+    @patch('llm_client.get_effective_openrouter_api_key', return_value='sk-or-key')
+    @patch('llm_client.get_effective_provider', return_value='openrouter')
+    def test_returns_false_on_connection_failure(self, _prov, _key, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.verify_connection.return_value = False
+        mock_get_client.return_value = mock_client
+
+        from llm_client import verify_llm_connection
+        result = verify_llm_connection()
+
+        self.assertFalse(result)
+
+    @patch('llm_client.get_llm_client', side_effect=Exception('connection refused'))
+    @patch('llm_client.get_effective_openrouter_api_key', return_value='sk-or-key')
+    @patch('llm_client.get_effective_provider', return_value='openrouter')
+    def test_returns_false_on_exception(self, _prov, _key, _client):
+        from llm_client import verify_llm_connection
+        self.assertFalse(verify_llm_connection())
+
+
 if __name__ == '__main__':
     unittest.main()

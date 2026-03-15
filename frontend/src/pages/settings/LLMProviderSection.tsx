@@ -23,6 +23,54 @@ function LLMProviderSection({
   onBaseUrlChange,
   onOpenrouterApiKeyChange,
 }: LLMProviderSectionProps) {
+  function StatusBadge({ variant, label }: { variant: 'green' | 'yellow' | 'muted'; label: string }) {
+    const styles = {
+      green: { bg: 'bg-green-500/10 text-green-600 dark:text-green-400', dot: 'bg-green-500' },
+      yellow: { bg: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400', dot: 'bg-yellow-500' },
+      muted: { bg: 'bg-muted text-muted-foreground', dot: 'bg-muted-foreground/50' },
+    };
+    const s = styles[variant];
+    return (
+      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${s.bg}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+        {label}
+      </span>
+    );
+  }
+
+  function renderApiKeyStatus() {
+    if (llmProvider === LLM_PROVIDERS.OPENROUTER) {
+      if (openrouterApiKeyConfigured) {
+        return <StatusBadge variant="green" label="Configured" />;
+      }
+      return (
+        <>
+          <StatusBadge variant="yellow" label="Not configured" />
+          <p className="mt-2 text-sm text-muted-foreground">
+            Set OPENROUTER_API_KEY environment variable or enter it above
+          </p>
+        </>
+      );
+    }
+
+    if (apiKeyConfigured) {
+      return <StatusBadge variant="green" label="Configured (env)" />;
+    }
+
+    if (llmProvider === LLM_PROVIDERS.ANTHROPIC) {
+      return (
+        <>
+          <StatusBadge variant="yellow" label="Not configured" />
+          <p className="mt-2 text-sm text-muted-foreground">
+            Set ANTHROPIC_API_KEY environment variable to enable Anthropic API access
+          </p>
+        </>
+      );
+    }
+
+    return <StatusBadge variant="muted" label="Not required" />;
+  }
+
   return (
     <CollapsibleSection title="LLM Provider" defaultOpen>
       <div className="space-y-4">
@@ -85,44 +133,7 @@ function LLMProviderSection({
 
         <div>
           <p className="text-sm font-medium text-foreground mb-1">API Key Status</p>
-          {llmProvider === LLM_PROVIDERS.OPENROUTER ? (
-            openrouterApiKeyConfigured ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-600 dark:text-green-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                Configured
-              </span>
-            ) : (
-              <>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
-                  Not configured
-                </span>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Set OPENROUTER_API_KEY environment variable or enter it above
-                </p>
-              </>
-            )
-          ) : apiKeyConfigured ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-600 dark:text-green-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-              Configured (env)
-            </span>
-          ) : llmProvider === LLM_PROVIDERS.ANTHROPIC ? (
-            <>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
-                Not configured
-              </span>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Set ANTHROPIC_API_KEY environment variable to enable Anthropic API access
-              </p>
-            </>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground">
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
-              Not required
-            </span>
-          )}
+          {renderApiKeyStatus()}
         </div>
       </div>
     </CollapsibleSection>

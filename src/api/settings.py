@@ -11,6 +11,11 @@ from api import (
     get_database, _enrich_models_with_pricing, limiter,
 )
 from config import WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API, WHISPER_BACKEND_OPENROUTER, OPENROUTER_BASE_URL
+from llm_client import (
+    get_effective_provider, get_effective_base_url, get_api_key, get_effective_openrouter_api_key,
+    get_llm_client,
+    PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER, PROVIDER_OPENAI_COMPATIBLE, PROVIDER_OLLAMA,
+)
 from utils.url import validate_url, validate_base_url, SSRFError
 from webhook_service import render_template_preview, fire_test_event, load_webhooks, VALID_EVENTS
 
@@ -37,11 +42,6 @@ def get_settings():
     from database import DEFAULT_SYSTEM_PROMPT, DEFAULT_VERIFICATION_PROMPT
     from ad_detector import AdDetector, DEFAULT_MODEL
     from chapters_generator import CHAPTERS_MODEL
-    from llm_client import (
-        get_effective_provider, get_effective_base_url, get_api_key, get_effective_openrouter_api_key,
-        PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER,
-    )
-
     settings = db.get_all_settings()
 
     # Shorthand for building {value, isDefault} response dicts
@@ -198,6 +198,15 @@ def update_ad_detection_settings():
 
     provider_changed = False
     if 'llmProvider' in data:
+        valid_llm_providers = (
+            PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER,
+            PROVIDER_OPENAI_COMPATIBLE, PROVIDER_OLLAMA,
+            'openai', 'wrapper',  # legacy aliases in PROVIDERS_NON_ANTHROPIC
+        )
+        if data['llmProvider'] not in valid_llm_providers:
+            return json_response(
+                {'error': f'llmProvider must be one of: {", ".join(valid_llm_providers)}'}, 400
+            )
         db.set_setting('llm_provider', data['llmProvider'], is_default=False)
         logger.info(f"Updated LLM provider to: {data['llmProvider']}")
         provider_changed = True
@@ -217,7 +226,6 @@ def update_ad_detection_settings():
         provider_changed = True
 
     if provider_changed:
-        from llm_client import get_llm_client
         get_llm_client(force_new=True)
 
     if 'whisperBackend' in data:
@@ -275,7 +283,6 @@ def reset_ad_detection_settings():
     db.reset_setting('auto_process_enabled')
 
     # Reset LLM provider settings back to env var defaults
-    from llm_client import get_llm_client
     db.reset_setting('llm_provider')
     db.reset_setting('openai_base_url')
     db.reset_setting('openrouter_api_key')
@@ -330,7 +337,6 @@ def get_available_models():
 @log_request
 def refresh_models():
     """Force refresh the model list from the LLM provider."""
-    from llm_client import get_llm_client
     from ad_detector import AdDetector
 
     get_llm_client(force_new=True)

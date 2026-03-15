@@ -354,7 +354,7 @@ This is a comma-separated list of domains excluded from Audiobookshelf's SSRF fi
 
 ### Using Claude Code Wrapper (Max Subscription)
 
-Instead of using API credits, you can use the [Claude Code OpenAI Wrapper](https://github.com/ttlequals0/claude-code-openai-wrapper) to leverage your Claude Max subscription.
+Instead of using API credits, you can use the [Claude Code OpenAI Wrapper](https://github.com/ttlequals0/claude-code-openai-wrapper) to use your Claude Max subscription instead.
 
 **Quick Start:**
 
@@ -415,7 +415,7 @@ environment:
   - OPENAI_MODEL=qwen3:14b
 ```
 
-> **Linux users:** `host.docker.internal` doesn't resolve by default on Linux.[^3]
+> **Linux users:** `host.docker.internal` doesn't resolve by default on Linux. Add `extra_hosts: ["host.docker.internal:host-gateway"]` to your Docker service definition.
 
 The `OPENAI_API_KEY` variable is not required for Ollama. Token counts will still be tracked in the UI but cost will always show as $0.00, which is accurate since local inference is free.
 
@@ -461,7 +461,7 @@ Simplest task. Summarization only -- no structured detection. Minimize cost and 
 
 > **Example split for 16GB VRAM:** Pass 1 -> `qwen3:14b Q5_K_M` / Verification -> `qwen3:8b Q5_K_M` / Chapters -> `qwen3:4b Q4_K_M`
 
-> **Avoid models under 7B for production use.**[^2]
+> **Avoid models under 7B for production use.** JSON reliability degrades significantly at smaller sizes, which causes silent detection failures rather than recoverable errors. See [JSON Reliability Risks](#json-reliability-risks).
 
 ---
 
@@ -542,7 +542,7 @@ If MinusPod and whisper-server are on the same Docker network, use the container
 
 The `--dtw large.v3.turbo` flag enables word-level timestamps for precise ad boundary detection. On CUDA GPUs, `--no-flash-attn` is required alongside `--dtw` -- flash attention silently disables DTW, causing word-level timestamps to be missing from the API response. On Apple Silicon (Metal), this flag is not needed. `WHISPER_DEVICE=cpu` prevents MinusPod from attempting to initialize a local CUDA GPU. MinusPod already preprocesses audio to 16kHz mono WAV before sending it to the API, so the whisper.cpp `--convert` flag is not needed.
 
-> **Warning:** If you add `--convert` for use with other clients, be aware of silent failure modes.[^1]
+> **Warning:** If you add `--convert` for use with other clients, be aware that whisper.cpp writes temporary converted files to the current working directory. In Docker, the default CWD may not be writable, causing whisper.cpp to silently return empty transcription results (200 with 0 segments). Set `working_dir: /tmp` in your compose file or mount a writable volume if you need `--convert`.
 
 ### whisper.cpp on Apple Silicon (native)
 
@@ -567,7 +567,7 @@ WHISPER_API_BASE_URL=http://host.docker.internal:8765/v1
 WHISPER_DEVICE=cpu
 ```
 
-> **Linux users:** Replace `host.docker.internal` with your host IP, or see the workaround.[^3]
+> **Linux users:** Replace `host.docker.internal` with your host IP, or add `extra_hosts: ["host.docker.internal:host-gateway"]` to your Docker service definition.
 
 ### Groq
 
@@ -818,14 +818,6 @@ The `replace.mp3` file will be inserted at each ad break. Keep it short (1-3 sec
 This tool is for personal use only. Only use it with podcasts you have permission to modify or where such modification is permitted under applicable laws. Respect content creators and their terms of service.
 
 **LLM accuracy notice:** Most testing and development has been done with Anthropic Claude models. Detection accuracy may vary when using other LLM providers (Ollama, OpenRouter with non-Claude models, OpenAI-compatible endpoints). See the [Accuracy vs. Claude](#accuracy-vs-claude) section for details.
-
----
-
-[^1]: If you add `--convert` for use with other clients, be aware that whisper.cpp writes temporary converted files to the current working directory. In Docker, the default CWD may not be writable, causing whisper.cpp to silently return empty transcription results (200 with 0 segments). Set `working_dir: /tmp` in your compose file or mount a writable volume if you need `--convert`.
-
-[^2]: Avoid models under 7B for production use. JSON reliability degrades significantly at smaller sizes, which causes silent detection failures rather than recoverable errors. See [JSON Reliability Risks](#json-reliability-risks).
-
-[^3]: `host.docker.internal` doesn't resolve by default on Linux. Add `extra_hosts: ["host.docker.internal:host-gateway"]` to your Docker service definition.
 
 ## License
 

@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.66] - 2026-03-15
+
+### Fixed
+- **OpenRouter model filtering**: `model_matches_provider` now returns True for OpenRouter (routes to any model), fixing false rejections of claude models via OpenRouter.
+- **LLM provider validation**: `llmProvider` is now validated against known providers before DB storage, preventing invalid values from persisting.
+- **OpenRouter startup verification**: `verify_llm_connection` now actually calls `verify_connection()` for OpenRouter instead of only checking key presence.
+- **Nested ternary in LLMProviderSection**: Extracted `renderApiKeyStatus()` helper for readability.
+- **Redundant expose directive**: Removed `expose: "8000"` from `docker-compose.openrouter.yml` (redundant with `ports`).
+
+### Added
+- **OpenRouter model/verify tests**: 8 new tests covering `model_matches_provider` for OpenRouter and `verify_llm_connection` OpenRouter paths.
+
+## [1.0.65] - 2026-03-15
+
+### Fixed
+- **Whisper API 413 errors**: Convert preprocessed WAV to FLAC (lossless, ~4-5x smaller) before uploading to Whisper API, preventing HTTP 413 (Request Entity Too Large) errors from APIs with tight upload limits (e.g. OpenRouter).
+
 ## [1.0.64] - 2026-03-15
 
 ### Improved

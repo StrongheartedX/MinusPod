@@ -135,6 +135,8 @@ def get_effective_provider() -> str:
 
 def model_matches_provider(model_id: str, provider: str) -> bool:
     """Check whether a model ID plausibly belongs to the given provider."""
+    if provider == PROVIDER_OPENROUTER:
+        return True  # OpenRouter routes to any model
     is_claude_model = 'claude' in model_id.lower()
     if provider == PROVIDER_ANTHROPIC:
         return is_claude_model
@@ -744,6 +746,23 @@ def get_api_key() -> Optional[str]:
         return os.environ.get('OPENAI_API_KEY', os.environ.get('ANTHROPIC_API_KEY', 'not-needed'))
 
 
+def _verify_endpoint(base_url: str, label: str) -> bool:
+    """Verify that an LLM endpoint is reachable via verify_connection."""
+    logger.info(f"Verifying LLM endpoint: {base_url}")
+    try:
+        client = get_llm_client(force_new=True)
+        if hasattr(client, 'verify_connection'):
+            if not client.verify_connection(timeout=10.0):
+                logger.error(f"LLM endpoint unreachable: {base_url}")
+                logger.error("Ad detection and chapter generation will fail until this is resolved")
+                return False
+        logger.info(f"LLM provider: {label} (verified, endpoint: {base_url})")
+        return True
+    except Exception as e:
+        logger.error(f"{label} endpoint verification failed: {e}")
+        return False
+
+
 def verify_llm_connection() -> bool:
     """Verify the LLM endpoint is reachable at startup.
 
@@ -762,25 +781,16 @@ def verify_llm_connection() -> bool:
         if not api_key:
             logger.warning("No OPENROUTER_API_KEY configured - ad detection and chapter generation will be disabled")
             return False
-        logger.info(f"LLM provider: openrouter (API key configured, endpoint: {OPENROUTER_BASE_URL})")
+        if not _verify_endpoint(OPENROUTER_BASE_URL, 'openrouter'):
+            return False
         return True
     elif provider in PROVIDERS_NON_ANTHROPIC:
         base_url = get_effective_base_url()
         if provider == PROVIDER_OLLAMA and not base_url.rstrip('/').endswith('/v1'):
             base_url = base_url.rstrip('/') + '/v1'
-        logger.info(f"Verifying LLM endpoint: {base_url}")
-
-        try:
-            client = get_llm_client(force_new=True)
-            if hasattr(client, 'verify_connection'):
-                if not client.verify_connection(timeout=10.0):
-                    logger.error(f"LLM endpoint unreachable: {base_url}")
-                    logger.error("Ad detection and chapter generation will fail until this is resolved")
-                    return False
-            return True
-        except Exception as e:
-            logger.error(f"LLM endpoint verification failed: {e}")
+        if not _verify_endpoint(base_url, provider):
             return False
+        return True
     else:
         # For Anthropic, verify API key is present
         api_key = get_api_key()

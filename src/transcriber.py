@@ -542,6 +542,7 @@ class Transcriber:
             List of transcript segments, or None on failure.
         """
         preprocessed_path = None
+        flac_path = None
         try:
             if whisper_settings is None:
                 whisper_settings = _get_whisper_settings()
@@ -556,6 +557,25 @@ class Transcriber:
             # Preprocess audio for consistent quality
             preprocessed_path = self.preprocess_audio(audio_path)
             transcribe_path = preprocessed_path if preprocessed_path else audio_path
+
+            # After preprocessing, compress to FLAC for upload (lossless, ~4-5x smaller than WAV).
+            # Prevents 413 errors from APIs with tight upload limits (e.g. OpenRouter).
+            if transcribe_path.endswith('.wav'):
+                fd, flac_path = tempfile.mkstemp(suffix='.flac')
+                os.close(fd)
+                try:
+                    ffmpeg_result = subprocess.run(
+                        ['ffmpeg', '-y', '-i', transcribe_path, '-c:a', 'flac', flac_path],
+                        capture_output=True, timeout=60,
+                    )
+                    if ffmpeg_result.returncode == 0 and os.path.exists(flac_path):
+                        transcribe_path = flac_path
+                        logger.info(f"Compressed for upload: {os.path.getsize(flac_path) / 1024 / 1024:.1f}MB FLAC")
+                    else:
+                        flac_path = None
+                except Exception as e:
+                    logger.warning(f"FLAC compression failed, sending WAV: {e}")
+                    flac_path = None
 
             # Build request
             url = f"{base_url.rstrip('/')}/audio/transcriptions"
@@ -640,6 +660,11 @@ class Transcriber:
             if preprocessed_path and os.path.exists(preprocessed_path):
                 try:
                     os.unlink(preprocessed_path)
+                except OSError:
+                    pass
+            if flac_path and os.path.exists(flac_path):
+                try:
+                    os.unlink(flac_path)
                 except OSError:
                     pass
 
