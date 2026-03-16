@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.74] - 2026-03-16
+
+### Added
+- **Theme system**: User-selectable color themes on the Settings page (Catppuccin Mocha/Macchiato/Frappe, Dracula with 6 accent variants, Nord, Gruvbox, Solarized, Tokyo Night, GitHub Dark, UniFi, Blue Slate). The existing dark/light toggle switches between the light and dark halves of the active theme. Themes persist in localStorage. Frontend-only, no backend changes.
+
 ## [1.0.73] - 2026-03-16
 
 ### Fixed
