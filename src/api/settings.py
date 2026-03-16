@@ -230,6 +230,8 @@ def update_ad_detection_settings():
 
     if provider_changed:
         get_llm_client(force_new=True)
+        from pricing_fetcher import invalidate_pricing_cache
+        invalidate_pricing_cache()
 
     if 'whisperBackend' in data:
         valid_whisper_backends = (WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API)

@@ -12,7 +12,7 @@ info:
     - Monitor system status and trigger cleanup operations
     - Manage cross-episode ad patterns with network and podcast scope
     - Submit corrections to improve ad detection accuracy
-  version: 1.0.74
+  version: 1.0.75
   contact:
     name: MinusPod
   license:
@@ -2421,9 +2421,12 @@ paths:
                     items:
                       type: object
                       properties:
-                        modelId:
+                        matchKey:
                           type: string
-                          description: Model identifier
+                          description: Normalized model key for pricing lookups
+                        rawModelId:
+                          type: string
+                          description: Original model identifier from pricing source
                         displayName:
                           type: string
                           description: Human-readable model name
@@ -2433,9 +2436,42 @@ paths:
                         outputCostPerMtok:
                           type: number
                           description: Output cost per million tokens (USD)
+                        source:
+                          type: string
+                          description: Pricing data source (openrouter_api, pricepertoken, default, legacy)
                         updatedAt:
                           type: string
                           description: Last updated timestamp
+
+  /system/model-pricing/refresh:
+    post:
+      tags:
+        - System
+      summary: Force refresh model pricing
+      description: Force refresh pricing data from the active provider's pricing source (OpenRouter API or pricepertoken.com)
+      operationId: refreshModelPricing
+      responses:
+        '200':
+          description: Pricing refreshed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  modelsUpdated:
+                    type: integer
+                    description: Number of models with pricing data
+        '502':
+          description: Pricing fetch failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
 
   /system/cleanup:
     post:

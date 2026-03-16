@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.75] - 2026-03-16
+
+### Added
+- **Multi-provider LLM pricing**: Cost tracking now works for any LLM provider, not just Anthropic. Pricing is fetched live from OpenRouter's API (for OpenRouter users) or scraped from pricepertoken.com (for Anthropic, OpenAI, Groq, Mistral, DeepSeek, xAI, Together, Fireworks, Perplexity, and Google). Pricing refreshes automatically every 24 hours and on provider change. Local/Ollama providers report $0.
+- **Model name normalization**: A `normalize_model_key()` function maps model names across different naming conventions (API IDs, display names, provider-prefixed IDs) to a single lookup key, so pricing matches regardless of source format.
+- **Manual pricing refresh endpoint**: `POST /api/v1/system/model-pricing/refresh` forces an immediate pricing data refresh from the active provider's pricing source.
+- **Pricing source tracking**: Each model pricing entry now records its source (`openrouter_api`, `pricepertoken`, `default`, `legacy`) and the raw model ID from the pricing source.
+- **New dependency**: `beautifulsoup4` for HTML table parsing from pricepertoken.com.
+
+### Changed
+- **Schema migration**: `model_pricing` table gains `match_key`, `raw_model_id`, and `source` columns with a UNIQUE index on `match_key`. `token_usage` table gains `match_key` column. Existing rows are backfilled automatically. No data loss.
+- **Cost calculation**: `_calculate_token_cost()` now uses normalized `match_key` lookups instead of raw `model_id` matching.
+- **Token usage joins**: `get_token_usage_summary()` joins on `match_key` instead of `model_id` for correct pricing display across providers.
+- **Model list enrichment**: `_enrich_models_with_pricing()` uses `match_key` lookups and no longer calls `refresh_model_pricing()` directly (pricing comes from background fetch).
+- **Default pricing demoted to fallback**: `DEFAULT_MODEL_PRICING` is only used when live fetch fails AND the pricing table is empty (air-gapped/offline installs).
+
 ## [1.0.74] - 2026-03-16
 
 ### Added

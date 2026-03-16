@@ -128,40 +128,67 @@ class SettingsMixin:
         """Get all model pricing entries."""
         conn = self.get_connection()
         cursor = conn.execute(
-            """SELECT model_id, display_name, input_cost_per_mtok, output_cost_per_mtok, updated_at
+            """SELECT match_key, raw_model_id, display_name,
+                      input_cost_per_mtok, output_cost_per_mtok,
+                      source, updated_at
                FROM model_pricing ORDER BY display_name"""
         )
         return [
             {
-                'modelId': row['model_id'],
+                'matchKey': row['match_key'],
+                'rawModelId': row['raw_model_id'],
                 'displayName': row['display_name'],
                 'inputCostPerMtok': row['input_cost_per_mtok'],
                 'outputCostPerMtok': row['output_cost_per_mtok'],
+                'source': row['source'],
                 'updatedAt': row['updated_at'],
             }
             for row in cursor
         ]
 
-    def refresh_model_pricing(self, available_models: List[Dict]):
-        """Insert pricing for newly discovered models from DEFAULT_MODEL_PRICING.
+    def seed_default_pricing(self):
+        """Seed model_pricing from DEFAULT_MODEL_PRICING as fallback.
 
-        Called when the model list is refreshed via GET /settings/models.
-        Uses ON CONFLICT DO NOTHING to preserve any manual price overrides.
+        Called only when live fetch fails and table is empty.
+        Marks rows with source='default' so they get overwritten on next live fetch.
         """
+        from config import normalize_model_key
+
         conn = self.get_connection()
         inserted = 0
-        for model in available_models:
-            model_id = model.get('id', '')
-            if model_id in DEFAULT_MODEL_PRICING:
-                info = DEFAULT_MODEL_PRICING[model_id]
-                cursor = conn.execute(
-                    """INSERT INTO model_pricing (model_id, display_name, input_cost_per_mtok, output_cost_per_mtok)
-                       VALUES (?, ?, ?, ?)
-                       ON CONFLICT(model_id) DO NOTHING""",
-                    (model_id, info['name'], info['input'], info['output'])
-                )
-                if cursor.rowcount > 0:
-                    inserted += 1
+        for model_id, info in DEFAULT_MODEL_PRICING.items():
+            key = normalize_model_key(model_id)
+            cursor = conn.execute(
+                """INSERT INTO model_pricing
+                       (model_id, match_key, raw_model_id, display_name,
+                        input_cost_per_mtok, output_cost_per_mtok, source)
+                   VALUES (?, ?, ?, ?, ?, ?, 'default')
+                   ON CONFLICT(match_key) DO NOTHING""",
+                (model_id, key, model_id, info['name'], info['input'], info['output'])
+            )
+            if cursor.rowcount > 0:
+                inserted += 1
         conn.commit()
         if inserted > 0:
-            logger.info(f"Refreshed model pricing: {inserted} new models added")
+            logger.info(f"Seeded {inserted} default model pricing entries")
+
+    def upsert_fetched_pricing(self, models: List[Dict], source: str):
+        """Bulk upsert pricing fetched from an external source."""
+        conn = self.get_connection()
+        for m in models:
+            conn.execute(
+                """INSERT INTO model_pricing
+                       (model_id, match_key, raw_model_id, display_name,
+                        input_cost_per_mtok, output_cost_per_mtok, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(match_key) DO UPDATE SET
+                     raw_model_id = excluded.raw_model_id,
+                     display_name = excluded.display_name,
+                     input_cost_per_mtok = excluded.input_cost_per_mtok,
+                     output_cost_per_mtok = excluded.output_cost_per_mtok,
+                     source = excluded.source,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+                (m['raw_model_id'], m['match_key'], m['raw_model_id'], m['display_name'],
+                 m['input_cost_per_mtok'], m['output_cost_per_mtok'], source)
+            )
+        conn.commit()

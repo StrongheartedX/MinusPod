@@ -124,6 +124,24 @@ def get_model_pricing():
     return json_response({'models': db.get_model_pricing()})
 
 
+@api.route('/system/model-pricing/refresh', methods=['POST'])
+@log_request
+def refresh_model_pricing():
+    """Force refresh pricing data from provider's pricing source."""
+    from pricing_fetcher import force_refresh_pricing
+    try:
+        force_refresh_pricing()
+        db = get_database()
+        pricing = db.get_model_pricing()
+        return json_response({
+            'status': 'ok',
+            'modelsUpdated': len(pricing),
+        })
+    except Exception as e:
+        logger.error(f"Manual pricing refresh failed: {e}")
+        return json_response({'error': str(e)}, status=502)
+
+
 @api.route('/system/cleanup', methods=['POST'])
 @log_request
 def trigger_cleanup():
