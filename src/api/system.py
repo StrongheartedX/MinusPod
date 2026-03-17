@@ -120,9 +120,10 @@ def get_token_usage():
 @api.route('/system/model-pricing', methods=['GET'])
 @log_request
 def get_model_pricing():
-    """Get all known model pricing rates."""
+    """Get known model pricing rates, optionally filtered by source."""
     db = get_database()
-    return json_response({'models': db.get_model_pricing()})
+    source = request.args.get('source')
+    return json_response({'models': db.get_model_pricing(source=source)})
 
 
 @api.route('/system/model-pricing/refresh', methods=['POST'])

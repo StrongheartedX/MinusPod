@@ -14,7 +14,7 @@ from config import WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API, OPENROUTER_BASE_U
 from pricing_fetcher import force_refresh_pricing
 from llm_client import (
     get_effective_provider, get_effective_base_url, get_api_key, get_effective_openrouter_api_key,
-    get_llm_client,
+    get_llm_client, create_client_for_provider,
     PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER, PROVIDER_OPENAI_COMPATIBLE, PROVIDER_OLLAMA,
 )
 from utils.url import validate_url, validate_base_url, SSRFError
@@ -324,13 +324,41 @@ def reset_prompts_only():
 @api.route('/settings/models', methods=['GET'])
 @log_request
 def get_available_models():
-    """Get list of available Claude models."""
-    from ad_detector import AdDetector
+    """Get list of available models for the current or requested provider.
 
-    ad_detector = AdDetector()
-    models = ad_detector.get_available_models()
+    Accepts optional ?provider= query param to preview models for a different
+    provider before saving settings.
+    """
+    provider_override = request.args.get('provider')
+
+    if provider_override:
+        valid_providers = (
+            PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER,
+            PROVIDER_OPENAI_COMPATIBLE, PROVIDER_OLLAMA,
+        )
+        if provider_override not in valid_providers:
+            return error_response(
+                f'provider must be one of: {", ".join(valid_providers)}', 400
+            )
+        client = create_client_for_provider(provider_override)
+        if client:
+            try:
+                raw_models = client.list_models()
+                models = [
+                    {'id': m.id, 'name': m.name, 'created': m.created}
+                    for m in raw_models
+                ]
+            except Exception as e:
+                logger.error(f"Failed to list models for provider '{provider_override}': {e}")
+                models = []
+        else:
+            models = []
+    else:
+        from ad_detector import AdDetector
+        ad_detector = AdDetector()
+        models = ad_detector.get_available_models()
+
     _enrich_models_with_pricing(models)
-
     return json_response({'models': models})
 
 

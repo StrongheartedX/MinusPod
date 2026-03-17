@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.81] - 2026-03-17
+
+### Fixed
+- **Stale models on provider switch**: Model dropdown now refetches immediately when switching LLM provider (e.g. Anthropic to OpenRouter). The `GET /settings/models` endpoint accepts an optional `?provider=` query param so the frontend can preview models for a provider before saving settings. React Query key includes the selected provider for automatic cache separation.
+- **Missing prices on OpenRouter free models**: `fetch_openrouter_pricing()` no longer skips models where both input and output costs are $0. Free models (`:free` suffix) are now stored with $0 pricing so the UI displays pricing instead of showing nothing.
+
+### Removed
+- **Anthropic model alias filtering and resolution**: The `_filter_anthropic_aliases()` filter in `list_models()` and the `resolve_anthropic_alias()` runtime resolution in `get_model()`, `get_verification_model()`, and `get_chapters_model()` were added in v1.0.78-1.0.79 to work around intermittent 400 errors that turned out to be caused by an API key issue, not by Anthropic rejecting alias model IDs. Model IDs from the API and database are now used as-is without filtering or resolution (reverts to v1.0.74 behavior).
+
 ## [1.0.80] - 2026-03-17
 
 ### Fixed
@@ -36,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Migration failure on existing DB**: Seed INSERT into `model_pricing` no longer references `match_key`, `raw_model_id`, or `source` columns that only exist after the ALTER TABLE migration runs. Existing DBs upgrading from pre-1.0.75 schemas will now migrate cleanly.
 - **Stale pricing after provider change**: Switching LLM provider now calls `force_refresh_pricing()` to immediately fetch pricing for the new provider, instead of just resetting the TTL and waiting up to 15 minutes for the background loop.
-- **Noisy duplicate column log**: Downgraded the "duplicate column name" log in `_add_column_if_missing` from ERROR to DEBUG, since this is expected when multiple gunicorn workers race to run the same ALTER TABLE migration.
+- **Noisy duplicate column log**: Downgraded the "duplicate column name" log in `_add_column_if_missing` from ERROR to WARNING, since this is expected when multiple gunicorn workers race to run the same ALTER TABLE migration.
 
 ## [1.0.75] - 2026-03-16
 

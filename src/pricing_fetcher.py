@@ -45,9 +45,6 @@ def fetch_openrouter_pricing() -> List[Dict]:
             logger.debug(f"Skipping model with unparseable pricing: {model.get('id')}")
             continue
 
-        if input_per_mtok == 0 and output_per_mtok == 0:
-            continue
-
         raw_id = model.get('id', '')
         display_name = model.get('name', raw_id)
         key = normalize_model_key(raw_id)
@@ -71,8 +68,10 @@ def fetch_openrouter_pricing() -> List[Dict]:
 def _parse_price(text: str) -> Optional[float]:
     """Parse '$3.000' or '3.000' -> 3.0. Returns None for dashes/empty."""
     text = text.strip().lstrip('$').replace(',', '')
-    if not text or text in ('-', '--', 'N/A', 'n/a', 'free', 'Free'):
+    if not text or text in ('-', '--', 'N/A', 'n/a'):
         return None
+    if text.lower() == 'free':
+        return 0.0
     try:
         return float(text)
     except ValueError:

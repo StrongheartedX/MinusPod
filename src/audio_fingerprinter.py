@@ -266,6 +266,8 @@ class AudioFingerprinter:
         matching_bits = 0
 
         for i in range(min_len):
+            # Mask to 32 bits: fpcalc -raw emits signed ints, and
+            # int.bit_count() counts bits of abs(value), not two's complement
             xor = (fp1[i] ^ fp2[i]) & 0xFFFFFFFF
             diff_bits = xor.bit_count()
             matching_bits += 32 - diff_bits

@@ -12,7 +12,7 @@ info:
     - Monitor system status and trigger cleanup operations
     - Manage cross-episode ad patterns with network and podcast scope
     - Submit corrections to improve ad detection accuracy
-  version: 1.0.80
+  version: 1.0.81
   contact:
     name: MinusPod
   license:
@@ -2225,8 +2225,16 @@ paths:
       tags:
         - Settings
       summary: Get available AI models
-      description: Returns list of available AI models for ad detection
+      description: Returns list of available AI models for ad detection. Optionally accepts a provider query param to preview models for a different provider before saving settings.
       operationId: getAvailableModels
+      parameters:
+        - name: provider
+          in: query
+          required: false
+          description: Preview models for this provider without saving settings. Valid values are anthropic, openrouter, openai-compatible, ollama.
+          schema:
+            type: string
+            enum: [anthropic, openrouter, openai-compatible, ollama]
       responses:
         '200':
           description: List of available models

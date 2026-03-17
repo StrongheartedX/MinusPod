@@ -28,8 +28,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Any
 
-import re
-
 from config import (
     LLM_TIMEOUT_DEFAULT,
     LLM_TIMEOUT_LOCAL,
@@ -143,86 +141,6 @@ def get_effective_provider() -> str:
     if db_val:
         return db_val.lower()
     return os.environ.get('LLM_PROVIDER', PROVIDER_ANTHROPIC).lower()
-
-
-_DATE_SUFFIX_RE = re.compile(r'-20[2-3]\d\d{4}$')
-
-
-def _has_date_suffix(model_id: str) -> bool:
-    """Return True if model_id ends with a YYYYMMDD date suffix."""
-    return bool(_DATE_SUFFIX_RE.search(model_id))
-
-
-def _strip_date_suffix(model_id: str) -> str:
-    """Strip the YYYYMMDD date suffix from a model ID, if present."""
-    return _DATE_SUFFIX_RE.sub('', model_id)
-
-
-def _filter_anthropic_aliases(models: List['LLMModel']) -> List['LLMModel']:
-    """Remove Anthropic alias models when a dated version with the same prefix exists.
-
-    A non-dated model is only treated as an alias if a dated model with the
-    exact same version prefix exists (e.g. 'claude-sonnet-4-5' is an alias
-    when 'claude-sonnet-4-5-20250929' exists, but 'claude-sonnet-4-6' is NOT
-    an alias for 'claude-sonnet-4-5-20250929').
-    """
-    dated_prefixes = {
-        _strip_date_suffix(m.id)
-        for m in models
-        if m.id.startswith('claude-') and _has_date_suffix(m.id)
-    }
-    return [
-        m for m in models
-        if not (
-            m.id.startswith('claude-')
-            and not _has_date_suffix(m.id)
-            and m.id in dated_prefixes
-        )
-    ]
-
-
-_alias_cache: Dict[str, Any] = {}
-_alias_cache_lock = threading.Lock()
-_ALIAS_CACHE_TTL = 300.0  # 5 minutes -- model lists change rarely
-
-
-def resolve_anthropic_alias(model_id: str) -> str:
-    """If model_id is an Anthropic alias (no date suffix), resolve it to the dated ID.
-
-    Results are cached with a TTL to avoid repeated API calls during episode
-    processing. Returns the original model_id unchanged for non-Claude models,
-    dated IDs, or non-Anthropic providers.
-    """
-    if not model_id.startswith('claude-') or _has_date_suffix(model_id):
-        return model_id
-
-    # Check TTL cache
-    with _alias_cache_lock:
-        entry = _alias_cache.get(model_id)
-        if entry and (time.monotonic() - entry['ts']) < _ALIAS_CACHE_TTL:
-            return entry['val']
-
-    try:
-        client = get_llm_client()
-        if not isinstance(client, AnthropicClient):
-            return model_id
-        # list_models() already filters aliases, so all results are dated
-        all_models = client.list_models()
-        # Find dated models whose version prefix matches the alias exactly
-        candidates = [
-            m for m in all_models
-            if _has_date_suffix(m.id) and _strip_date_suffix(m.id) == model_id
-        ]
-        if candidates:
-            best = max(candidates, key=lambda m: m.id)
-            logger.info(f"Resolved Anthropic alias '{model_id}' -> '{best.id}'")
-            with _alias_cache_lock:
-                _alias_cache[model_id] = {'val': best.id, 'ts': time.monotonic()}
-            return best.id
-    except Exception as e:
-        logger.warning(f"Could not resolve Anthropic alias '{model_id}': {e}")
-
-    return model_id
 
 
 def model_matches_provider(model_id: str, provider: str) -> bool:
@@ -423,7 +341,7 @@ class AnthropicClient(LLMClient):
                         name=model.display_name if hasattr(model, 'display_name') else model.id,
                         created=str(model.created) if hasattr(model, 'created') else None
                     ))
-            return _filter_anthropic_aliases(models)
+            return models
         except Exception as e:
             logger.error(f"Could not fetch models from Anthropic API: {e}")
             return []
@@ -794,11 +712,23 @@ def get_llm_client(force_new: bool = False) -> LLMClient:
 
     provider = get_effective_provider()
 
-    if provider == PROVIDER_ANTHROPIC:
+    _cached_client = _build_client(provider)
+    if _cached_client is None:
+        logger.warning(f"Unknown LLM_PROVIDER '{provider}', defaulting to anthropic")
         _cached_client = AnthropicClient()
+
+    _cached_client.set_usage_callback(_record_token_usage)
+    logger.info(f"LLM client initialized: {_cached_client.get_provider_name()}")
+    return _cached_client
+
+
+def _build_client(provider: str) -> Optional[LLMClient]:
+    """Build an LLM client for a given provider without caching."""
+    if provider == PROVIDER_ANTHROPIC:
+        return AnthropicClient()
     elif provider == PROVIDER_OPENROUTER:
         api_key = get_effective_openrouter_api_key() or 'not-needed'
-        _cached_client = OpenAICompatibleClient(
+        return OpenAICompatibleClient(
             base_url=OPENROUTER_BASE_URL,
             api_key=api_key,
             extra_headers={
@@ -811,14 +741,25 @@ def get_llm_client(force_new: bool = False) -> LLMClient:
         if provider == PROVIDER_OLLAMA and not base_url.rstrip('/').endswith('/v1'):
             base_url = base_url.rstrip('/') + '/v1'
             logger.info(f"Ollama provider: normalized base_url to {base_url}")
-        _cached_client = OpenAICompatibleClient(base_url=base_url)
-    else:
-        logger.warning(f"Unknown LLM_PROVIDER '{provider}', defaulting to anthropic")
-        _cached_client = AnthropicClient()
+        return OpenAICompatibleClient(base_url=base_url)
+    return None
 
-    _cached_client.set_usage_callback(_record_token_usage)
-    logger.info(f"LLM client initialized: {_cached_client.get_provider_name()}")
-    return _cached_client
+
+def create_client_for_provider(provider: str) -> Optional[LLMClient]:
+    """Create a non-cached LLM client for a specific provider.
+
+    Used for previewing available models before saving provider settings.
+    Unlike get_llm_client(), this does not touch the global cache and does
+    not set a usage callback -- only suitable for list_models() calls.
+    """
+    try:
+        client = _build_client(provider)
+        if client is None:
+            logger.warning(f"Unknown provider '{provider}' for preview client")
+        return client
+    except Exception as e:
+        logger.error(f"Failed to create preview client for provider '{provider}': {e}")
+        return None
 
 
 def get_api_key() -> Optional[str]:

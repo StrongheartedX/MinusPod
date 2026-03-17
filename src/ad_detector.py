@@ -12,7 +12,6 @@ from llm_client import (
     is_retryable_error, is_rate_limit_error,
     get_llm_timeout, get_llm_max_retries,
     get_effective_provider, model_matches_provider,
-    resolve_anthropic_alias,
 )
 from utils.time import parse_timestamp, first_not_none
 
@@ -1147,29 +1146,21 @@ class AdDetector:
         return models_list
 
     def get_model(self) -> str:
-        """Get configured model from database or default.
-
-        If the stored model is an Anthropic alias (no date suffix), resolves
-        it to the corresponding dated inference ID via the live model list.
-        """
+        """Get configured model from database or default."""
         try:
             model = self.db.get_setting('claude_model')
             if model:
-                return resolve_anthropic_alias(model)
+                return model
         except Exception as e:
             logger.warning(f"Could not load model from DB: {e}")
         return DEFAULT_MODEL
 
     def get_verification_model(self) -> str:
-        """Get verification pass model from database or fall back to first pass model.
-
-        If the stored model is an Anthropic alias (no date suffix), resolves
-        it to the corresponding dated inference ID via the live model list.
-        """
+        """Get verification pass model from database or fall back to first pass model."""
         try:
             model = self.db.get_setting('verification_model')
             if model:
-                return resolve_anthropic_alias(model)
+                return model
         except Exception:
             pass
         return self.get_model()
@@ -1252,20 +1243,21 @@ class AdDetector:
         Returns:
             Tuple of (response, last_error). response is None if all retries failed.
         """
+        llm_kwargs = dict(
+            model=model,
+            max_tokens=2000,
+            temperature=0.0,
+            system=system_prompt,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=llm_timeout,
+            response_format={"type": "json_object"},
+        )
         response = None
         last_error = None
 
         for attempt in range(max_retries + 1):
             try:
-                response = self._llm_client.messages_create(
-                    model=model,
-                    max_tokens=2000,
-                    temperature=0.0,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": prompt}],
-                    timeout=llm_timeout,
-                    response_format={"type": "json_object"}
-                )
+                response = self._llm_client.messages_create(**llm_kwargs)
                 return response, None
             except Exception as e:
                 last_error = e
@@ -1291,15 +1283,7 @@ class AdDetector:
                 )
                 time.sleep(delay)
                 try:
-                    response = self._llm_client.messages_create(
-                        model=model,
-                        max_tokens=2000,
-                        temperature=0.0,
-                        system=system_prompt,
-                        messages=[{"role": "user", "content": prompt}],
-                        timeout=llm_timeout,
-                        response_format={"type": "json_object"}
-                    )
+                    response = self._llm_client.messages_create(**llm_kwargs)
                     logger.info(f"[{slug}:{episode_id}] {window_label} succeeded on retry {retry_num}")
                     return response, None
                 except Exception as e:

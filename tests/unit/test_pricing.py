@@ -296,13 +296,16 @@ class TestOpenRouterFetcher:
 
             results = fetch_openrouter_pricing()
 
-        # Free model should be skipped
-        assert len(results) == 1
+        # Both models returned (free models stored with $0 pricing)
+        assert len(results) == 2
         assert results[0]['raw_model_id'] == 'anthropic/claude-sonnet-4-5'
         assert results[0]['display_name'] == 'Claude Sonnet 4.5'
         assert results[0]['input_cost_per_mtok'] == 3.0
         assert results[0]['output_cost_per_mtok'] == 15.0
         assert results[0]['match_key'] == normalize_model_key('anthropic/claude-sonnet-4-5')
+        assert results[1]['raw_model_id'] == 'free/model'
+        assert results[1]['input_cost_per_mtok'] == 0.0
+        assert results[1]['output_cost_per_mtok'] == 0.0
 
 
 class TestSeedDefaultPricing:
@@ -448,7 +451,8 @@ class TestParsePrice:
 
     def test_free(self):
         from pricing_fetcher import _parse_price
-        assert _parse_price('free') is None
+        assert _parse_price('free') == 0.0
+        assert _parse_price('Free') == 0.0
 
     def test_whitespace(self):
         from pricing_fetcher import _parse_price

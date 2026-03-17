@@ -62,8 +62,8 @@ function Settings() {
   });
 
   const { data: models, isLoading: modelsLoading } = useQuery({
-    queryKey: ['models'],
-    queryFn: getModels,
+    queryKey: ['models', llmProvider],
+    queryFn: () => getModels(llmProvider),
   });
 
   const { data: whisperModels } = useQuery({
@@ -196,8 +196,8 @@ function Settings() {
 
   const refreshModelsMutation = useMutation({
     mutationFn: refreshModels,
-    onSuccess: (data) => {
-      queryClient.setQueryData(['models'], data.models);
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['models'] });
     },
   });
 

@@ -126,15 +126,25 @@ class SettingsMixin:
         )
         conn.commit()
 
-    def get_model_pricing(self) -> List[Dict]:
-        """Get all model pricing entries."""
+    def get_model_pricing(self, source: str = None) -> List[Dict]:
+        """Get model pricing entries, optionally filtered by source."""
         conn = self.get_connection()
-        cursor = conn.execute(
-            """SELECT match_key, raw_model_id, display_name,
-                      input_cost_per_mtok, output_cost_per_mtok,
-                      source, updated_at
-               FROM model_pricing ORDER BY display_name"""
-        )
+        if source:
+            cursor = conn.execute(
+                """SELECT match_key, raw_model_id, display_name,
+                          input_cost_per_mtok, output_cost_per_mtok,
+                          source, updated_at
+                   FROM model_pricing WHERE source = ?
+                   ORDER BY display_name""",
+                (source,)
+            )
+        else:
+            cursor = conn.execute(
+                """SELECT match_key, raw_model_id, display_name,
+                          input_cost_per_mtok, output_cost_per_mtok,
+                          source, updated_at
+                   FROM model_pricing ORDER BY display_name"""
+            )
         return [
             {
                 'matchKey': row['match_key'],
