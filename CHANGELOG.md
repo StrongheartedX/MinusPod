@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Codebase simplification pass**: Consolidated duplicate code, extracted shared utilities, and improved efficiency across backend Python source.
 - **Extracted shared utilities**: `parse_iso_datetime()` in `utils/time.py`, `parse_transcript_segments()` and `get_transcript_text_for_range()` in `utils/text.py`, `get_with_retry()` in `utils/http.py`, `calculate_backoff()` in `utils/retry.py` -- replaces inline duplicates across 10+ files.
 - **Provider constants moved to config.py**: `PROVIDER_ANTHROPIC`, `PROVIDER_OPENROUTER`, `PROVIDER_OLLAMA`, `PROVIDERS_NON_ANTHROPIC` now defined in `config.py` instead of `llm_client.py`.
-- **Webhook service refactored**: Replaced `urllib.request` with `post_with_retry()`, replaced inline datetime formatting with `utc_now_iso()`, replaced `_format_duration()` with shared `format_time()`, added `WebhookPayload` dataclass.
+- **Webhook service refactored**: Replaced `urllib.request`/`_dispatch_webhook()` with `post_with_retry()`, replaced inline datetime formatting with `utc_now_iso()`, added `WebhookPayload` dataclass. Webhook retry now only retries transient errors (429/5xx) instead of all HTTP errors.
 - **Stats query consolidated**: Replaced 7 separate `SELECT COUNT/AVG/SUM` queries in `get_processing_history_stats()` with a single `CASE WHEN` conditional aggregation query.
 - **Fingerprint N+1 query fixed**: `_load_fingerprints_from_db()` now uses a single JOIN query instead of per-row `get_ad_pattern_by_id()` calls.
 - **LLM client improvements**: Extracted `_log_messages()` to base class, replaced `httpx` with `requests` in Ollama fallback, added 5-minute TTL model list cache.
