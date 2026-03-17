@@ -113,14 +113,16 @@ class StatsMixin:
         )
         row = cursor.fetchone()
 
-        # Prefix match fallback (e.g. match_key 'gpt4o' matches stored 'gpt4o' but not 'gpt4omini')
+        # Prefix match fallback -- match_key must cover >= 80% of lookup key length
+        # to prevent short keys matching distinct longer models (e.g. 'gpt4o' must not match 'gpt4omini')
         if not row:
             cursor = conn.execute(
                 """SELECT input_cost_per_mtok, output_cost_per_mtok
                    FROM model_pricing
                    WHERE ? LIKE match_key || '%'
+                     AND length(match_key) >= length(?) * 0.8
                    ORDER BY length(match_key) DESC LIMIT 1""",
-                (match_key,)
+                (match_key, match_key)
             )
             row = cursor.fetchone()
             if row:

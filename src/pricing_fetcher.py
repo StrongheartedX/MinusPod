@@ -8,6 +8,7 @@ Fetches model pricing from:
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 import requests
@@ -200,20 +201,39 @@ def fetch_pricing(source: dict) -> List[Dict]:
         return []
 
 
-def refresh_pricing_if_stale():
+def refresh_pricing_if_stale(force: bool = False):
     """Fetch and persist pricing if cache has expired. Thread-safe.
 
     If live fetch fails and model_pricing is empty, seeds from DEFAULT_MODEL_PRICING.
 
-    Note: Each gunicorn worker has its own _last_fetch, so multiple workers may
-    independently fetch pricing. With a 24h TTL this is acceptable.
+    Args:
+        force: Skip both in-memory and DB TTL checks (used by force_refresh_pricing).
     """
     global _last_fetch
+    if not force:
+        with _fetch_lock:
+            if time.monotonic() - _last_fetch < PRICING_CACHE_TTL:
+                return
+
+        # Check if another worker already fetched recently (DB-level coordination)
+        try:
+            from database import Database
+            db = Database()
+            last_updated = db.get_pricing_last_updated()
+            if last_updated:
+                updated_dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+                age_seconds = (datetime.now(timezone.utc) - updated_dt).total_seconds()
+                if age_seconds < PRICING_CACHE_TTL:
+                    with _fetch_lock:
+                        _last_fetch = time.monotonic()
+                    logger.debug(f"Pricing fresh in DB ({age_seconds:.0f}s old, fetched by another worker)")
+                    return
+        except Exception as e:
+            logger.debug(f"Cross-worker pricing check failed, proceeding: {e}")
+
+    # Claim slot with short retry window to prevent concurrent fetches.
+    # If fetch fails, allows retry in 5 minutes instead of waiting full TTL.
     with _fetch_lock:
-        if time.monotonic() - _last_fetch < PRICING_CACHE_TTL:
-            return
-        # Claim slot with short retry window to prevent concurrent fetches.
-        # If fetch fails, allows retry in 5 minutes instead of waiting full TTL.
         _last_fetch = time.monotonic() - PRICING_CACHE_TTL + 300
 
     # Deferred imports to avoid circular dependency:
@@ -229,7 +249,6 @@ def refresh_pricing_if_stale():
     models = fetch_pricing(source)
 
     try:
-        # Deferred to avoid circular import at module level
         from database import Database
         db = Database()
 
@@ -251,9 +270,6 @@ def refresh_pricing_if_stale():
 
 def force_refresh_pricing():
     """Force a pricing refresh regardless of TTL. Called by manual API endpoint."""
-    global _last_fetch
-    with _fetch_lock:
-        _last_fetch = 0.0
-    refresh_pricing_if_stale()
+    refresh_pricing_if_stale(force=True)
 
 

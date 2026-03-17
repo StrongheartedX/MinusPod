@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import threading
 import uuid
 
 from flask import request
@@ -231,7 +232,7 @@ def update_ad_detection_settings():
 
     if provider_changed:
         get_llm_client(force_new=True)
-        force_refresh_pricing()
+        threading.Thread(target=force_refresh_pricing, daemon=True).start()
 
     if 'whisperBackend' in data:
         valid_whisper_backends = (WHISPER_BACKEND_LOCAL, WHISPER_BACKEND_API)

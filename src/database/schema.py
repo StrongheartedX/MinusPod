@@ -939,7 +939,7 @@ class SchemaMixin:
                     )
 
                 # Deduplicate: if multiple model_ids map to the same match_key,
-                # keep the most recently updated row per match_key
+                # keep the row with the highest rowid per match_key
                 dupes = conn.execute("""
                     SELECT model_id, match_key FROM model_pricing
                     WHERE rowid NOT IN (

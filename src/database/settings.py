@@ -126,6 +126,13 @@ class SettingsMixin:
         )
         conn.commit()
 
+    def get_pricing_last_updated(self) -> Optional[str]:
+        """Get the most recent updated_at from model_pricing table."""
+        conn = self.get_connection()
+        cursor = conn.execute("SELECT MAX(updated_at) as last_updated FROM model_pricing")
+        row = cursor.fetchone()
+        return row['last_updated'] if row else None
+
     def get_model_pricing(self, source: str = None) -> List[Dict]:
         """Get model pricing entries, optionally filtered by source."""
         conn = self.get_connection()
@@ -185,6 +192,11 @@ class SettingsMixin:
     def upsert_fetched_pricing(self, models: List[Dict], source: str):
         """Bulk upsert pricing fetched from an external source."""
         conn = self.get_connection()
+        # Deduplicate by match_key (last entry wins) to avoid PK/UNIQUE conflict
+        seen = {}
+        for m in models:
+            seen[m['match_key']] = m
+        models = list(seen.values())
         for m in models:
             conn.execute(
                 """INSERT INTO model_pricing

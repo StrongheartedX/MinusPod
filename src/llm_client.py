@@ -612,6 +612,7 @@ def get_llm_max_retries() -> int:
 # =============================================================================
 
 _cached_client: Optional[LLMClient] = None
+_client_lock = threading.Lock()
 
 # Per-episode token accumulator using thread-local storage.
 # Each thread (background processor, HTTP handler) gets its own
@@ -707,19 +708,20 @@ def get_llm_client(force_new: bool = False) -> LLMClient:
     if force_new:
         _clear_provider_cache()
 
-    if _cached_client is not None and not force_new:
+    with _client_lock:
+        if _cached_client is not None and not force_new:
+            return _cached_client
+
+        provider = get_effective_provider()
+
+        _cached_client = _build_client(provider)
+        if _cached_client is None:
+            logger.warning(f"Unknown LLM_PROVIDER '{provider}', defaulting to anthropic")
+            _cached_client = AnthropicClient()
+
+        _cached_client.set_usage_callback(_record_token_usage)
+        logger.info(f"LLM client initialized: {_cached_client.get_provider_name()}")
         return _cached_client
-
-    provider = get_effective_provider()
-
-    _cached_client = _build_client(provider)
-    if _cached_client is None:
-        logger.warning(f"Unknown LLM_PROVIDER '{provider}', defaulting to anthropic")
-        _cached_client = AnthropicClient()
-
-    _cached_client.set_usage_callback(_record_token_usage)
-    logger.info(f"LLM client initialized: {_cached_client.get_provider_name()}")
-    return _cached_client
 
 
 def _build_client(provider: str) -> Optional[LLMClient]:

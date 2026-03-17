@@ -1275,7 +1275,7 @@ class AdDetector:
                     break
 
         # Per-window retry for transient failures (intermittent 400s/500s)
-        if response is None and last_error is not None:
+        if response is None and last_error is not None and self._is_retryable_error(last_error):
             for retry_num, delay in enumerate([2, 5], 1):
                 logger.warning(
                     f"[{slug}:{episode_id}] {window_label} per-window retry "

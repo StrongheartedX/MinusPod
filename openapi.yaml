@@ -12,7 +12,7 @@ info:
     - Monitor system status and trigger cleanup operations
     - Manage cross-episode ad patterns with network and podcast scope
     - Submit corrections to improve ad detection accuracy
-  version: 1.0.81
+  version: 1.0.82
   contact:
     name: MinusPod
   license:
@@ -1955,6 +1955,12 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: page
+          in: query
+          description: Page number (1-based). Alternative to offset. If both provided, page takes precedence.
+          schema:
+            type: integer
+            minimum: 1
         - name: sort_by
           in: query
           description: Column to sort by
@@ -1991,6 +1997,9 @@ paths:
                     type: integer
                   offset:
                     type: integer
+                  page:
+                    type: integer
+                    description: Current page number (1-based)
 
   /history/stats:
     get:
@@ -2247,6 +2256,15 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Model'
+        '400':
+          description: Invalid provider parameter
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
 
   /settings/models/refresh:
     post:
@@ -2415,6 +2433,14 @@ paths:
       summary: Get model pricing rates
       description: Returns all known LLM model pricing rates from the model_pricing table
       operationId: getModelPricing
+      parameters:
+        - name: source
+          in: query
+          required: false
+          description: Filter pricing entries by source
+          schema:
+            type: string
+            enum: [openrouter_api, pricepertoken, default, legacy]
       responses:
         '200':
           description: Model pricing list

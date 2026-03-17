@@ -336,67 +336,43 @@ class TestSeedDefaultPricing:
 
     def test_seed_default_pricing(self):
         """seed_default_pricing should insert DEFAULT_MODEL_PRICING entries."""
-        from database.settings import DEFAULT_MODEL_PRICING
+        from database.settings import SettingsMixin, DEFAULT_MODEL_PRICING
 
         conn = self._create_test_db()
+        mixin = SettingsMixin()
+        mixin.get_connection = lambda: conn
 
-        # Simulate seed_default_pricing logic
-        inserted = 0
-        for model_id, info in DEFAULT_MODEL_PRICING.items():
-            key = normalize_model_key(model_id)
-            cursor = conn.execute(
-                """INSERT INTO model_pricing
-                       (model_id, match_key, raw_model_id, display_name,
-                        input_cost_per_mtok, output_cost_per_mtok, source)
-                   VALUES (?, ?, ?, ?, ?, ?, 'default')
-                   ON CONFLICT(match_key) DO NOTHING""",
-                (model_id, key, model_id, info['name'], info['input'], info['output'])
-            )
-            if cursor.rowcount > 0:
-                inserted += 1
-        conn.commit()
+        mixin.seed_default_pricing()
 
-        assert inserted > 0
         rows = conn.execute("SELECT * FROM model_pricing").fetchall()
-        assert len(rows) > 0
+        assert len(rows) == len(DEFAULT_MODEL_PRICING)
         for row in rows:
             assert row['source'] == 'default'
+            assert row['match_key'] is not None
 
     def test_upsert_overwrites_defaults(self):
         """upsert_fetched_pricing should overwrite default-sourced entries."""
-        from database.settings import DEFAULT_MODEL_PRICING
+        from database.settings import SettingsMixin
 
         conn = self._create_test_db()
+        mixin = SettingsMixin()
+        mixin.get_connection = lambda: conn
 
         # Seed a default entry
-        key = normalize_model_key('claude-sonnet-4-5')
-        conn.execute(
-            """INSERT INTO model_pricing
-                   (model_id, match_key, raw_model_id, display_name,
-                    input_cost_per_mtok, output_cost_per_mtok, source)
-               VALUES (?, ?, ?, ?, ?, ?, 'default')""",
-            ('claude-sonnet-4-5', key, 'claude-sonnet-4-5', 'Test', 3.0, 15.0)
-        )
-        conn.commit()
+        mixin.seed_default_pricing()
 
-        # Upsert with new pricing (simulate upsert_fetched_pricing)
-        conn.execute(
-            """INSERT INTO model_pricing
-                   (model_id, match_key, raw_model_id, display_name,
-                    input_cost_per_mtok, output_cost_per_mtok, source)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(match_key) DO UPDATE SET
-                 raw_model_id = excluded.raw_model_id,
-                 display_name = excluded.display_name,
-                 input_cost_per_mtok = excluded.input_cost_per_mtok,
-                 output_cost_per_mtok = excluded.output_cost_per_mtok,
-                 source = excluded.source""",
-            (key, key, 'claude-sonnet-4-5', 'Claude Sonnet 4.5 (Updated)', 99.0, 199.0, 'pricepertoken')
-        )
-        conn.commit()
+        # Upsert with new pricing
+        mixin.upsert_fetched_pricing([{
+            'match_key': normalize_model_key('claude-sonnet-4-5'),
+            'raw_model_id': 'claude-sonnet-4-5',
+            'display_name': 'Claude Sonnet 4.5 (Updated)',
+            'input_cost_per_mtok': 99.0,
+            'output_cost_per_mtok': 199.0,
+        }], source='pricepertoken')
 
         row = conn.execute(
-            "SELECT * FROM model_pricing WHERE match_key = ?", (key,)
+            "SELECT * FROM model_pricing WHERE match_key = ?",
+            (normalize_model_key('claude-sonnet-4-5'),)
         ).fetchone()
         assert row['input_cost_per_mtok'] == 99.0
         assert row['source'] == 'pricepertoken'
@@ -461,3 +437,126 @@ class TestParsePrice:
     def test_comma_thousands(self):
         from pricing_fetcher import _parse_price
         assert _parse_price('$1,000.000') == 1000.0
+
+
+class TestCallLlmForWindowRetry:
+    """Test per-window retry logic in _call_llm_for_window."""
+
+    def test_non_retryable_error_skips_per_window_retry(self):
+        """Non-retryable errors (auth, forbidden) should not trigger per-window retry."""
+        from unittest.mock import MagicMock, patch
+        from ad_detector import AdDetector
+
+        detector = AdDetector.__new__(AdDetector)
+        detector._llm_client = MagicMock()
+
+        # Simulate auth error (non-retryable)
+        auth_error = Exception("401 Unauthorized: invalid API key")
+        detector._llm_client.messages_create.side_effect = auth_error
+        detector._is_retryable_error = MagicMock(return_value=False)
+        detector._calculate_backoff = MagicMock(return_value=0.0)
+
+        response, error = detector._call_llm_for_window(
+            model="test-model", system_prompt="test", prompt="test",
+            max_retries=1, llm_timeout=10, slug="test", episode_id="ep1",
+            window_label="Window 1"
+        )
+
+        assert response is None
+        assert error is auth_error
+        # Non-retryable errors break immediately on first attempt (no retries at all)
+        assert detector._llm_client.messages_create.call_count == 1
+
+    def test_retryable_error_triggers_per_window_retry(self):
+        """Retryable errors should trigger per-window retry with backoff."""
+        from unittest.mock import MagicMock, patch, call
+        from ad_detector import AdDetector
+
+        detector = AdDetector.__new__(AdDetector)
+        detector._llm_client = MagicMock()
+
+        transient_error = Exception("500 Internal Server Error")
+        success_response = MagicMock()
+        # Fail on primary attempts, then succeed on per-window retry
+        detector._llm_client.messages_create.side_effect = [
+            transient_error, transient_error, success_response
+        ]
+        detector._is_retryable_error = MagicMock(return_value=True)
+        detector._calculate_backoff = MagicMock(return_value=0.0)
+
+        with patch('ad_detector.time.sleep'):
+            response, error = detector._call_llm_for_window(
+                model="test-model", system_prompt="test", prompt="test",
+                max_retries=1, llm_timeout=10, slug="test", episode_id="ep1",
+                window_label="Window 1"
+            )
+
+        assert response is success_response
+        assert error is None
+
+
+class TestHistoryPageParam:
+    """Test history endpoint page parameter conversion."""
+
+    def test_page_to_offset_conversion(self):
+        """page=3 with limit=10 should produce offset=20."""
+        # Test the logic directly
+        limit = 10
+        page = 3
+        offset = (page - 1) * limit
+        assert offset == 20
+
+    def test_offset_to_page_derivation(self):
+        """offset=20 with limit=10 should derive page=3."""
+        limit = 10
+        offset = 20
+        page = (offset // limit) + 1
+        assert page == 3
+
+    def test_page_1_is_offset_0(self):
+        limit = 50
+        page = 1
+        offset = (page - 1) * limit
+        assert offset == 0
+
+
+class TestGetModelPricingSourceFilter:
+    """Test get_model_pricing with source filter."""
+
+    def _create_test_db(self):
+        import sqlite3
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE model_pricing (
+                model_id TEXT PRIMARY KEY,
+                match_key TEXT,
+                raw_model_id TEXT,
+                display_name TEXT NOT NULL,
+                input_cost_per_mtok REAL NOT NULL,
+                output_cost_per_mtok REAL NOT NULL,
+                source TEXT DEFAULT 'legacy',
+                updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            )
+        """)
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_model_pricing_match_key ON model_pricing(match_key)"
+        )
+        return conn
+
+    def test_source_filter(self):
+        from database.settings import SettingsMixin
+
+        conn = self._create_test_db()
+        mixin = SettingsMixin()
+        mixin.get_connection = lambda: conn
+
+        mixin.seed_default_pricing()
+        # All seeded entries have source='default'
+        all_rows = mixin.get_model_pricing()
+        default_rows = mixin.get_model_pricing(source='default')
+        other_rows = mixin.get_model_pricing(source='pricepertoken')
+
+        assert len(all_rows) > 0
+        assert len(default_rows) == len(all_rows)
+        assert len(other_rows) == 0

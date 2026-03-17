@@ -6,6 +6,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.82] - 2026-03-17
+
+### Fixed
+- **Duplicate pricing fetches across gunicorn workers**: Each worker had its own in-memory `_last_fetch` counter, causing independent pricing fetches on every container start. Added DB-level coordination via `MAX(updated_at)` from `model_pricing` table -- if another worker recently wrote pricing within TTL, the second worker syncs its in-memory timer and skips the HTTP fetch.
+- **Pre-roll detection gap in Full reprocess mode**: Full mode (`skip_patterns=True`) bypasses Stages 1 & 2, leaving `detect_preroll()` as the sole safety net for short pre-roll ads. Lowered the ad pattern match threshold from 2 to 1 when `skip_patterns=True` so DAI pre-rolls with a single obvious ad indicator are caught.
+- **Prefix match pricing lookup matched wrong models**: `_calculate_token_cost` prefix fallback could match a shorter stored key to a longer distinct model (e.g., `gpt4o` incorrectly matching `gpt4omini`). Added 80% length coverage requirement so stored keys must cover most of the lookup key.
+- **Per-window LLM retry retried non-retryable errors**: `_call_llm_for_window` per-window retry loop retried unconditionally, including auth and forbidden errors. Now checks `is_retryable_error()` before entering per-window retries.
+- **Raw exception leaked in pricing refresh 502 response**: `POST /system/model-pricing/refresh` returned `str(e)` in the error response, potentially exposing internal paths. Now returns a generic message and logs details server-side.
+- **OpenAPI spec gaps**: Added missing `?source=` on `GET /system/model-pricing`, `?page=` on `GET /history`, and `400` response on `GET /settings/models`.
+- **Normalization variant suffix case sensitivity**: `normalize_model_key` only stripped lowercase OpenRouter suffixes (`:free`); now handles mixed case (`:Free`, `:Extended`).
+- **Pricing upsert dual-constraint tension**: `upsert_fetched_pricing` could hit PK/UNIQUE conflict if scraped data contained duplicate display names. Added pre-loop deduplication by `match_key`.
+- **Fingerprint sliding window list allocation**: `_find_matches_fast` created a new list slice per sliding step (~1200x per episode). Refactored `_calculate_similarity` to accept start/end indices, avoiding the copy.
+- **LLM client race on `_cached_client`**: Added `_client_lock` to synchronize `get_llm_client()` across threads.
+- **Pricing refresh blocks settings save**: `force_refresh_pricing()` in the provider-change settings handler now runs in a background thread instead of blocking the HTTP response.
+
 ## [1.0.81] - 2026-03-17
 
 ### Fixed

@@ -241,7 +241,9 @@ class AudioFingerprinter:
     def _calculate_similarity(
         self,
         fp1: List[int],
-        fp2: List[int]
+        fp2: List[int],
+        fp1_start: int = 0,
+        fp1_end: int = 0
     ) -> float:
         """
         Calculate similarity between two fingerprint arrays using bit error rate.
@@ -249,6 +251,8 @@ class AudioFingerprinter:
         Args:
             fp1: First fingerprint array
             fp2: Second fingerprint array
+            fp1_start: Start index into fp1 (default 0)
+            fp1_end: End index into fp1 (default 0 means len(fp1))
 
         Returns:
             Similarity score between 0 and 1
@@ -256,9 +260,12 @@ class AudioFingerprinter:
         if not fp1 or not fp2:
             return 0.0
 
+        if fp1_end == 0:
+            fp1_end = len(fp1)
+
         # Use the shorter length for comparison
-        min_len = min(len(fp1), len(fp2))
-        if min_len == 0:
+        min_len = min(fp1_end - fp1_start, len(fp2))
+        if min_len <= 0:
             return 0.0
 
         # Count matching bits
@@ -268,7 +275,7 @@ class AudioFingerprinter:
         for i in range(min_len):
             # Mask to 32 bits: fpcalc -raw emits signed ints, and
             # int.bit_count() counts bits of abs(value), not two's complement
-            xor = (fp1[i] ^ fp2[i]) & 0xFFFFFFFF
+            xor = (fp1[fp1_start + i] ^ fp2[i]) & 0xFFFFFFFF
             diff_bits = xor.bit_count()
             matching_bits += 32 - diff_bits
             total_bits += 32
@@ -382,18 +389,20 @@ class AudioFingerprinter:
                 )
                 last_log_time = now
 
-            # Slice fingerprint for current window
+            # Compute indices into raw_ints for current window (avoid list copy)
             start_idx = int(position * ints_per_second)
             end_idx = int((position + FINGERPRINT_CHUNK_SIZE) * ints_per_second)
-            window_ints = raw_ints[start_idx:end_idx]
+            end_idx = min(end_idx, len(raw_ints))
 
-            if len(window_ints) < 4:
+            if end_idx - start_idx < 4:
                 position += SLIDING_STEP_SIZE
                 continue
 
             matched = False
             for pattern_id, known_ints, known_duration, sponsor in decoded_known:
-                similarity = self._calculate_similarity(window_ints, known_ints)
+                similarity = self._calculate_similarity(
+                    raw_ints, known_ints, fp1_start=start_idx, fp1_end=end_idx
+                )
 
                 if similarity >= MATCH_THRESHOLD:
                     match = FingerprintMatch(

@@ -141,7 +141,7 @@ def refresh_model_pricing():
         })
     except Exception as e:
         logger.error(f"Manual pricing refresh failed: {e}")
-        return error_response(str(e), 502)
+        return error_response('Pricing refresh failed, check server logs', 502)
 
 
 @api.route('/system/cleanup', methods=['POST'])
