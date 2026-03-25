@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.88] - 2026-03-25
+
+### Fixed
+- **RSS feed refresh broken for feeds with new episodes**: v1.0.86 regression -- removing inline date parsing left `published_str` undefined, crashing `refresh_rss_feed` for any feed with discovered episodes. This prevented RSS feeds from updating after processing and blocked auto-process queuing.
+- **RSS feed stale after 304 when episodes finish processing**: When upstream returns 304 Not Modified, the periodic refresh returned early without regenerating the modified RSS -- missing any episodes that completed processing since the last full refresh. Now checks if the cached RSS is missing processed episodes and forces a full re-fetch if so.
+
 ## [1.0.87] - 2026-03-25
 
 ### Fixed

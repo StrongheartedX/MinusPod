@@ -107,13 +107,23 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
                         feed_url, etag=None, last_modified=None
                     )
                 else:
-                    refresh_logger.info(f"[{slug}] Feed unchanged (304), skipping refresh")
-                    db.update_podcast(
-                        slug,
-                        last_checked_at=utc_now_iso()
+                    cached_rss = storage.get_rss(slug)
+                    rss_stale = not cached_rss or any(
+                        ep['episode_id'] not in cached_rss
+                        for ep in db.get_processed_episodes_for_feed(podcast['id'])
                     )
-                    status_service.complete_feed_refresh(slug, 0)
-                    return True
+                    if rss_stale:
+                        refresh_logger.info(
+                            f"[{slug}] Feed unchanged (304) but RSS cache stale, forcing full fetch"
+                        )
+                        feed_content, new_etag, new_last_modified = rss_parser.fetch_feed_conditional(
+                            feed_url, etag=None, last_modified=None
+                        )
+                    else:
+                        refresh_logger.info(f"[{slug}] Feed unchanged (304), skipping refresh")
+                        db.update_podcast(slug, last_checked_at=utc_now_iso())
+                        status_service.complete_feed_refresh(slug, 0)
+                        return True
             else:
                 refresh_logger.info(
                     f"[{slug}] Feed unchanged (304) but no episodes discovered yet, "
@@ -203,6 +213,7 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
 
                     # Parse publish date to check if recent
                     is_recent = False
+                    published_str = ep.get('published', '')
                     if published_str:
                         try:
                             # RSS dates are typically RFC 2822 format
