@@ -203,6 +203,7 @@ def refresh_rss_feed(slug: str, feed_url: str, force: bool = False):
 
                     # Parse publish date to check if recent
                     is_recent = False
+                    published_str = ep.get('published', '')
                     if published_str:
                         try:
                             # RSS dates are typically RFC 2822 format

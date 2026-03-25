@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.88] - 2026-03-25
+
+### Fixed
+- **RSS feed refresh broken for feeds with new episodes**: v1.0.86 regression -- removing inline date parsing left `published_str` undefined, crashing `refresh_rss_feed` for any feed with discovered episodes. This prevented RSS feeds from updating after processing and blocked auto-process queuing.
+
 ## [1.0.87] - 2026-03-25
 
 ### Fixed
