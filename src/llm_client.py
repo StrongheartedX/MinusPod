@@ -48,6 +48,19 @@ from config import (
 logger = logging.getLogger(__name__)
 io_logger = logging.getLogger('podcast.llm_io')
 
+# Shared JSON format instruction injected into the system prompt when the
+# endpoint does not support response_format: {"type": "json_object"} natively.
+_JSON_FORMAT_SETTING_KEY = 'llm_json_format_supported'
+
+_JSON_FORMAT_SYSTEM_INSTRUCTION = (
+    "\n\n<output_format>CRITICAL JSON REQUIREMENTS:\n"
+    "1. Respond with ONLY valid JSON - no markdown, no ```json, no text\n"
+    "2. Start directly with '[' or '{', end with ']' or '}'\n"
+    "3. Use double quotes for strings, no trailing commas\n"
+    "4. Use null for missing values (not None)\n"
+    "Malformed JSON causes parsing failures.</output_format>"
+)
+
 
 def _log_content(label: str, content: str, max_length: int = 2000):
     """Log LLM content at DEBUG level with intelligent truncation.
@@ -334,16 +347,8 @@ class AnthropicClient(LLMClient):
         # inject JSON instructions into the system prompt when requested
         effective_system = system
         if response_format and response_format.get('type') == 'json_object':
-            json_instruction = (
-                "\n\n<output_format>CRITICAL JSON REQUIREMENTS:\n"
-                "1. Respond with ONLY valid JSON - no markdown, no ```json, no text\n"
-                "2. Start directly with '[' or '{', end with ']' or '}'\n"
-                "3. Use double quotes for strings, no trailing commas\n"
-                "4. Use null for missing values (not None)\n"
-                "Malformed JSON causes parsing failures.</output_format>"
-            )
             if '<output_format>' not in system:
-                effective_system = system + json_instruction
+                effective_system = system + _JSON_FORMAT_SYSTEM_INSTRUCTION
                 logger.debug("Added JSON format instructions to system prompt")
 
         self._log_messages("Anthropic", effective_system, messages, model, temperature, max_tokens)
@@ -444,6 +449,9 @@ class OpenAICompatibleClient(LLMClient):
         # Cache which token parameter each model accepts: "max_completion_tokens" or "max_tokens"
         # Per-instance to avoid cross-contamination between clients with different base_urls
         self._token_param_cache: Dict[str, str] = {}
+        # Whether endpoint supports response_format: {"type": "json_object"}.
+        # None = not yet probed. Persisted to DB across restarts.
+        self._json_format_supported: Optional[bool] = None
 
     def _ensure_client(self):
         """Lazy initialize the OpenAI client."""
@@ -505,7 +513,13 @@ class OpenAICompatibleClient(LLMClient):
         }
 
         if response_format:
-            kwargs["response_format"] = response_format
+            if self._get_json_format_supported() is False:
+                # Endpoint doesn't support json_object -- inject via prompt instead
+                if response_format.get('type') == 'json_object' and '<output_format>' not in system:
+                    all_messages[0] = {**all_messages[0], "content": system + _JSON_FORMAT_SYSTEM_INSTRUCTION}
+                    logger.debug("Endpoint lacks json_object support; using prompt injection fallback")
+            else:
+                kwargs["response_format"] = response_format
 
         try:
             if cached_param is not None:
@@ -609,15 +623,97 @@ class OpenAICompatibleClient(LLMClient):
             response = self._client.models.list(timeout=timeout)
             models = list(response.data) if response.data else []
             logger.info(f"LLM endpoint verified: {self.base_url} ({len(models)} models available)")
+            # Probe json_object support if not already known
+            if self._get_json_format_supported() is None:
+                self.probe_json_format_support(model=models[0].id)
             return True
         except Exception as e:
             logger.warning(f"OpenAI-compatible model list failed: {self.base_url} - {e}")
             native = self._try_ollama_native_list()
             if native:
                 logger.info(f"LLM endpoint verified via Ollama native API ({len(native)} models)")
+                if self._get_json_format_supported() is None:
+                    self.probe_json_format_support(model=native[0].id)
                 return True
             logger.error(f"LLM endpoint verification failed: {self.base_url} - {e}")
             return False
+
+    def _get_json_format_supported(self) -> Optional[bool]:
+        """Check whether this endpoint supports response_format json_object.
+
+        Returns True, False, or None (unknown/never probed).
+        Uses instance cache first, then DB lookup.
+        """
+        if self._json_format_supported is not None:
+            return self._json_format_supported
+        db_val = _get_cached_setting(_JSON_FORMAT_SETTING_KEY)
+        if db_val == 'true':
+            self._json_format_supported = True
+        elif db_val == 'false':
+            self._json_format_supported = False
+        return self._json_format_supported
+
+    def probe_json_format_support(self, model: Optional[str] = None) -> Optional[bool]:
+        """Send a minimal completion to test json_object response_format support.
+
+        Args:
+            model: Model to test with. If None, uses first model from list_models().
+
+        Returns:
+            True if supported, False if not, None if probe was inconclusive.
+        """
+        self._ensure_client()
+
+        if model is None:
+            models = self.list_models()
+            if not models:
+                logger.warning("No models available for json_format probe, skipping")
+                return None
+            model = models[0].id
+
+        from openai import BadRequestError
+        token_param = self._token_param_cache.get(model, "max_completion_tokens")
+        try:
+            self._client.chat.completions.create(
+                model=model,
+                **{token_param: 10},
+                temperature=0.0,
+                messages=[
+                    {"role": "system", "content": "Respond with JSON."},
+                    {"role": "user", "content": '{"test": true}'},
+                ],
+                response_format={"type": "json_object"},
+                timeout=10.0,
+            )
+            self._json_format_supported = True
+            logger.info(f"Endpoint supports response_format json_object ({self.base_url})")
+        except BadRequestError as e:
+            if 'response_format' in str(e).lower():
+                self._json_format_supported = False
+                logger.info(
+                    f"Endpoint does not support response_format json_object ({self.base_url}); "
+                    "will use prompt injection fallback"
+                )
+            else:
+                logger.warning(f"json_format probe got unexpected 400: {e}")
+                return None
+        except Exception as e:
+            logger.warning(f"json_format probe failed (non-fatal): {e}")
+            return None
+
+        # Persist to DB so we don't re-probe after restart
+        try:
+            from database import Database
+            db = Database()
+            db.set_setting(
+                _JSON_FORMAT_SETTING_KEY,
+                'true' if self._json_format_supported else 'false',
+                is_default=False,
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist json_format probe result: {e}")
+
+        return self._json_format_supported
 
     def _try_ollama_native_list(self) -> List[LLMModel]:
         """Try Ollama's native /api/tags endpoint as a fallback for model listing.

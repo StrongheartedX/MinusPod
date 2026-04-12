@@ -18,7 +18,7 @@ from config import (
 from pricing_fetcher import force_refresh_pricing
 from llm_client import (
     get_effective_provider, get_effective_base_url, get_api_key, get_effective_openrouter_api_key,
-    get_llm_client, create_client_for_provider,
+    get_llm_client, create_client_for_provider, _JSON_FORMAT_SETTING_KEY,
 )
 from utils.url import validate_url, validate_base_url, SSRFError
 from webhook_service import render_template_preview, fire_test_event, load_webhooks, VALID_EVENTS
@@ -236,7 +236,11 @@ def update_ad_detection_settings():
         provider_changed = True
 
     if provider_changed:
-        get_llm_client(force_new=True)
+        # Clear cached json_format probe so the new endpoint gets re-probed
+        db.set_setting(_JSON_FORMAT_SETTING_KEY, '', is_default=True)
+        client = get_llm_client(force_new=True)
+        if hasattr(client, 'probe_json_format_support'):
+            client.probe_json_format_support()
         threading.Thread(target=force_refresh_pricing, daemon=True).start()
 
     if 'whisperBackend' in data:
@@ -301,6 +305,7 @@ def reset_ad_detection_settings():
     db.reset_setting('llm_provider')
     db.reset_setting('openai_base_url')
     db.reset_setting('openrouter_api_key')
+    db.set_setting(_JSON_FORMAT_SETTING_KEY, '', is_default=True)
 
     # Reset whisper backend settings
     db.reset_setting('whisper_backend')
@@ -309,7 +314,9 @@ def reset_ad_detection_settings():
     db.reset_setting('whisper_api_model')
 
     # Recreate LLM client with reset settings
-    get_llm_client(force_new=True)
+    client = get_llm_client(force_new=True)
+    if hasattr(client, 'probe_json_format_support'):
+        client.probe_json_format_support()
 
     # Mark whisper model for reload
     try:
