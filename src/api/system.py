@@ -252,8 +252,8 @@ def backup_database():
             download_name=filename,
         )
     except Exception as e:
-        logger.error(f"Database backup failed: {e}")
-        return error_response('Backup failed', 500, details=str(e))
+        logger.exception("Database backup failed")
+        return error_response('Backup failed', 500)
     finally:
         if tmp_path:
             try:
