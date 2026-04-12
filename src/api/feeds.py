@@ -1,7 +1,7 @@
 """Feed routes: /feeds/* endpoints."""
 import logging
 import os
-import xml.etree.ElementTree as ET  # build-only (ElementTree/SubElement/tostring); parsing uses defusedxml
+import xml.etree.ElementTree as ET  # defusedxml has no SubElement/tostring, so keep ET for OPML export only
 from typing import Optional
 
 from flask import request, Response
@@ -153,8 +153,8 @@ def add_feed():
         }, 201)
 
     except Exception as e:
-        logger.error(f"Failed to add feed: {e}")
-        return error_response('Failed to add feed', 500, details=str(e))
+        logger.exception("Failed to add feed")
+        return error_response('Failed to add feed', 500)
 
 
 @api.route('/feeds/import-opml', methods=['POST'])
@@ -452,8 +452,8 @@ def update_feed(slug):
             'feedUrl': f"{base_url}/{slug}"
         })
     except Exception as e:
-        logger.error(f"Failed to update feed {slug}: {e}")
-        return error_response('Failed to update feed', 500, details=str(e))
+        logger.exception(f"Failed to update feed {slug}")
+        return error_response('Failed to update feed', 500)
 
 
 @api.route('/feeds/<slug>', methods=['DELETE'])
@@ -482,8 +482,8 @@ def delete_feed(slug):
         return json_response({'message': 'Feed deleted', 'slug': slug})
 
     except Exception as e:
-        logger.error(f"Failed to delete feed {slug}: {e}")
-        return error_response('Failed to delete feed', 500, details=str(e))
+        logger.exception(f"Failed to delete feed {slug}")
+        return error_response('Failed to delete feed', 500)
 
 
 @api.route('/feeds/<slug>/refresh', methods=['POST'])
@@ -532,8 +532,8 @@ def refresh_feed(slug):
         })
 
     except Exception as e:
-        logger.error(f"Failed to refresh feed {slug}: {e}")
-        return error_response('Failed to refresh feed', 500, details=str(e))
+        logger.exception(f"Failed to refresh feed {slug}")
+        return error_response('Failed to refresh feed', 500)
 
 
 @api.route('/feeds/refresh', methods=['POST'])
@@ -571,8 +571,8 @@ def refresh_all_feeds():
         })
 
     except Exception as e:
-        logger.error(f"Failed to refresh all feeds: {e}")
-        return error_response('Failed to refresh feeds', 500, details=str(e))
+        logger.exception("Failed to refresh all feeds")
+        return error_response('Failed to refresh feeds', 500)
 
 
 def _extract_artwork_url_from_feed(source_url: str) -> Optional[str]:

@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-04-12
+
+### Security
+- Fully close CodeQL #5 (py/stack-trace-exposure). v1.1.2 moved exception text from the `message` arg to `details`, but the scanner still traced a flow because `error_response` unconditionally contained `data['details'] = details` for non-5xx calls; the `if status >= 500` early-return guard was invisible to CodeQL's taint analysis. Each 5xx caller now uses `logger.exception(...)` for server-side capture (full traceback included automatically) and passes no `details` at all, so there is no data flow from `str(e)` into the response.
+
 ## [1.1.2] - 2026-04-12
 
 ### Security
