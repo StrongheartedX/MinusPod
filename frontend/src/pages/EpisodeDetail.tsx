@@ -5,6 +5,8 @@ import { getEpisode, getOriginalTranscript, reprocessEpisode, regenerateChapters
 import { submitCorrection } from '../api/patterns';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { EPISODE_STATUS_COLORS } from '../utils/episodeStatus';
+import { stripHtml } from '../utils/stripHtml';
+import { formatConfidence } from '../utils/confidence';
 import AdEditor, { AdCorrection } from '../components/AdEditor';
 import PatternLink from '../components/PatternLink';
 import CollapsibleSection from '../components/CollapsibleSection';
@@ -307,12 +309,13 @@ function EpisodeDetail() {
 
         {episode.description && (
           <p className="mt-4 text-muted-foreground whitespace-pre-wrap break-words">
-            {episode.description
-              .replace(/<br\s*\/?>/gi, '\n')
-              .replace(/<\/p>/gi, '\n')
-              .replace(/<\/li>/gi, '\n')
-              .replace(/<li>/gi, '- ')
-              .replace(/<[^>]*>/g, '')
+            {stripHtml(
+              episode.description
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<\/p>/gi, '\n')
+                .replace(/<\/li>/gi, '\n')
+                .replace(/<li>/gi, '- ')
+            )
               .replace(/\n([ \t]*\n)+/g, '\n')
               .trim()}
           </p>
@@ -432,7 +435,7 @@ function EpisodeDetail() {
                     return null;
                   })()}
                   <span className="ml-auto text-sm text-muted-foreground whitespace-nowrap">
-                    {Math.round(segment.confidence * 100)}% confidence
+                    {formatConfidence(segment)}
                   </span>
                 </div>
                 {/* Row 2: Description - full width below badges for better mobile display */}
@@ -487,7 +490,7 @@ function EpisodeDetail() {
                           )}
                         </div>
                         <span className="text-sm text-muted-foreground">
-                          {Math.round(segment.confidence * 100)}% confidence
+                          {formatConfidence(segment)}
                         </span>
                       </div>
                       {segment.validation?.flags && segment.validation.flags.length > 0 && (

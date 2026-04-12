@@ -1,6 +1,7 @@
 """Flask routes: serve_ui, serve_rss, serve_episode, serve_transcript_vtt, serve_chapters_json, health_check."""
 import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from functools import wraps
@@ -10,9 +11,11 @@ import requests
 import requests.exceptions
 from flask import Response, send_file, abort, send_from_directory, request
 from werkzeug.exceptions import NotFound
+from werkzeug.utils import safe_join
 
 from config import APP_USER_AGENT, JIT_RETRY_COOLDOWN_SECONDS, MAX_EPISODE_RETRIES
 from utils.time import parse_iso_datetime
+from utils.url import validate_url, SSRFError
 
 feed_logger = logging.getLogger('podcast.feed')
 refresh_logger = logging.getLogger('podcast.refresh')
@@ -97,6 +100,11 @@ def _lookup_episode(slug, episode_id, feed_map, episode_row=None):
 def _head_upstream(slug, episode_id, original_url):
     """Proxy a HEAD request to the upstream audio URL."""
     try:
+        validate_url(original_url)
+    except SSRFError as e:
+        feed_logger.warning(f"[{slug}:{episode_id}] SSRF blocked in HEAD upstream: {e}")
+        abort(502)
+    try:
         resp = requests.head(original_url, timeout=10, allow_redirects=True,
                              headers={'User-Agent': APP_USER_AGENT})
         if resp.status_code == 200:
@@ -128,13 +136,17 @@ def register_routes(app):
         if not STATIC_DIR.exists():
             return "UI not built. Run 'npm run build' in frontend directory.", 404
 
-        # For assets directory, return 404 if file doesn't exist (don't serve index.html)
-        # This prevents MIME type errors when JS/CSS files are not found
-        if path and path.startswith('assets/') and not (STATIC_DIR / path).exists():
-            return f"Asset not found: {path}", 404
+        # safe_join returns None on traversal attempts (e.g. '../secret').
+        safe_path = safe_join(str(STATIC_DIR), path) if path else None
+
+        # For assets directory, return 404 if file doesn't exist (don't serve
+        # index.html) - prevents MIME type errors when JS/CSS are not found.
+        if path and path.startswith('assets/'):
+            if not safe_path or not os.path.isfile(safe_path):
+                return "Asset not found", 404
 
         # Serve index.html for SPA routes (non-asset paths)
-        if not path or not (STATIC_DIR / path).exists():
+        if not path or not safe_path or not os.path.isfile(safe_path):
             return send_from_directory(STATIC_DIR, 'index.html')
 
         return send_from_directory(STATIC_DIR, path)

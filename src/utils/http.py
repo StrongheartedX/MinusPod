@@ -2,8 +2,21 @@
 import logging
 import time
 from typing import Optional
+from urllib.parse import urlsplit
 
 import requests
+
+
+def safe_url_for_log(url: str) -> str:
+    """Return only scheme+host for logging; drops path, query, fragment so tokens
+    embedded anywhere in the URL never reach logs."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ''
+        scheme = parts.scheme or 'http'
+        return f"{scheme}://{host}" if host else '<url>'
+    except Exception:
+        return '<url>'
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +68,8 @@ def _request_with_retry(
                 continue
 
             # Non-retryable error or last attempt
-            logger.error(f"{log_prefix} error {response.status_code}: {response.text[:500]}")
+            body_len = len(response.text) if response.text else 0
+            logger.error(f"{log_prefix} error {response.status_code} (body {body_len} chars)")
             return None
 
         except requests.exceptions.Timeout:
