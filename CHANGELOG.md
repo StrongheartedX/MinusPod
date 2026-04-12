@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.99] - 2026-04-12
+
+### Fixed
+- **LM Studio / OpenAI-compatible endpoint json_object rejection**: Endpoints that don't support `response_format: {"type": "json_object"}` (e.g. LM Studio) now detected at startup via a lightweight probe. When unsupported, JSON output instructions are injected into the system prompt instead. Result cached in DB across restarts, cleared on provider/URL change. Fixes #111.
+
 ## [1.0.98] - 2026-04-10
 
 ### Changed
