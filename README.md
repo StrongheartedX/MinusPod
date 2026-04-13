@@ -20,7 +20,7 @@ MinusPod is a self-hosted server that removes ads before you ever hit play. It t
   - [Audiobookshelf](#audiobookshelf)
 - [Environment Variables](#environment-variables)
   - [Using Claude Code Wrapper (Max Subscription)](#using-claude-code-wrapper-max-subscription)
-- [Using Ollama (Local LLM)](#using-ollama-local-llm)
+- [Using Ollama (Local or Cloud)](#using-ollama-local-or-cloud)
 - [Remote Whisper Transcription](#remote-whisper-transcription)
 - [Using OpenRouter](#using-openrouter)
 - [LLM Pricing](#llm-pricing)

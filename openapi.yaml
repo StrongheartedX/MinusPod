@@ -883,6 +883,41 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /feeds/{slug}/episodes/{episodeId}/reprocess:
+    post:
+      tags:
+        - Processing
+      summary: Force reprocess an episode (legacy)
+      description: |
+        Legacy reprocess endpoint. Prefer `/episodes/{slug}/{episodeId}/reprocess`,
+        which supports `mode=reprocess` and `mode=full`.
+      operationId: reprocessEpisodeLegacy
+      parameters:
+        - $ref: '#/components/parameters/slug'
+        - $ref: '#/components/parameters/episodeId'
+      responses:
+        '200':
+          description: Episode reprocess queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  episodeId:
+                    type: string
+                  slug:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Episode is currently processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /feeds/{slug}/episodes/{episodeId}/cancel:
     post:
       tags:
