@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-04-13
+
+### Fixed
+- After an LLM provider change, prune saved ad-detection / verification / chapters model IDs that the new provider's live `/v1/models` does not advertise. Previously an OpenRouter-style tag (e.g. `minimax-m2`, `kimi-k2:1t`) configured against one provider survived a switch to Ollama Cloud and every window silently failed with `not_found_error` — the server returned HTTP 200 with an error envelope, the parser treated the window as "no ads found," and an entire episode processed with zero detections. The prune uses the raw `client.list_models()` list (bypassing `_ensure_configured_models_present`, which would re-inject the stale IDs), and falls back to `reset_setting` so the new provider's default model takes over.
+
 ## [1.4.0] - 2026-04-13
 
 ### Added
