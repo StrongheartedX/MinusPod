@@ -620,10 +620,7 @@ class Transcriber:
                 )
                 return None
 
-            logger.info(
-                f"Sending audio to whisper API: {safe_url_for_log(url)} "
-                f"(size={upload_size/1024/1024:.1f}MB)"
-            )
+            logger.info("Sending audio to whisper API (size=%.1fMB)", upload_size / 1024 / 1024)
 
             with open(transcribe_path, 'rb') as audio_file:
                 response = post_with_retry(
