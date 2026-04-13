@@ -326,7 +326,7 @@ From **Settings → Providers & API Keys** you can configure Anthropic, OpenAI-c
 1. Set `MINUSPOD_MASTER_PASSPHRASE` in the container environment. This value is the input to the PBKDF2 key derivation that produces the encryption key. Treat it like any other production secret - keep it stable, back it up, and do not commit it. Rotating it is an intentional, explicit operation (future work).
 2. Set an admin password in the UI so Settings is reachable. The admin password is an operational gate for the Settings surface; it is not used as encryption material and changing it does not touch stored keys.
 
-If `MINUSPOD_MASTER_PASSPHRASE` is missing, the Providers section renders a "Setup required" banner, the API returns `409 provider_crypto_unavailable`, and existing env-var credentials continue to work. No key material is ever returned in GET responses; the API only reports whether each provider is configured and whether the active value comes from the database or the environment.
+If `MINUSPOD_MASTER_PASSPHRASE` is missing, the key inputs inside the LLM Provider and Transcription sections collapse to a one-line "Setup required" note, the API returns `409 provider_crypto_unavailable` on write, and existing env-var credentials continue to work. No key material is ever returned in GET responses; the API only reports whether each provider is configured and whether the active value comes from the database or the environment.
 
 ## Finding Podcast RSS Feeds
 
@@ -384,6 +384,7 @@ This is a comma-separated list of domains excluded from Audiobookshelf's SSRF fi
 | `RETENTION_PERIOD` | `1440` | **Deprecated.** Legacy minutes-based retention (auto-converted to days on first startup). Use the Settings UI or `PUT /api/v1/settings/retention` instead. Retention now resets episodes to "discovered" instead of deleting them. |
 | `AD_DETECTION_MAX_TOKENS` | `2000` | Maximum tokens for LLM ad detection responses (increase if responses are being truncated) |
 | `APP_PASSWORD` | _(none)_ | Initial password for web UI (can also be set in Settings > Security) |
+| `MINUSPOD_MASTER_PASSPHRASE` | _(none)_ | Unlocks the encrypted provider-key store (Settings > LLM Provider, Settings > Transcription). When unset the key inputs show "Setup required" and only env-var credentials are used. Keep it stable; losing it makes stored keys unreadable (env fallback still works). |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `DATA_DIR` | `/app/data` | Data storage directory |
 | `PODCAST_INDEX_API_KEY` | _(none)_ | PodcastIndex.org API key for podcast search (or configure in Settings) |
