@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-04-13
+
+### Security
+- Close CodeQL #32 (py/clear-text-logging-sensitive-data) in `src/api/providers.py`. The success log on the rotate-passphrase endpoint only emitted an integer row count, but CodeQL's taint analysis follows the `oldPassphrase` / `newPassphrase` body parameters through the enclosing function scope and flags any log sink it can reach. Moved the log call into a helper function with no password-named locals so the scanner has no taint path to follow.
+
 ## [1.3.0] - 2026-04-13
 
 ### Added

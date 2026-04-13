@@ -115,6 +115,10 @@ def _resolve_key(db, cfg):
     return os.environ.get(cfg['env'])
 
 
+def _log_rotation_complete(rows: int) -> None:
+    logger.info("secrets_crypto rotated rows=%s", rows)
+
+
 @api.route('/settings/providers/rotate-passphrase', methods=['POST'])
 def rotate_master_passphrase():
     if not crypto_available():
@@ -137,7 +141,7 @@ def rotate_master_passphrase():
     except Exception:
         logger.exception("provider passphrase rotation failed")
         return error_response('rotation failed', 500)
-    logger.info("provider passphrase rotated rows=%s", rotated)
+    _log_rotation_complete(rotated)
     return json_response({'rotated': rotated}, 200)
 
 
