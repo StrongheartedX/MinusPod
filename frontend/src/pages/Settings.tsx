@@ -9,7 +9,6 @@ import { LLM_PROVIDERS } from '../api/types';
 
 import SystemStatusSection from './settings/SystemStatusSection';
 import StorageRetentionSection from './settings/StorageRetentionSection';
-import ProcessingTimeoutsSection from './settings/ProcessingTimeoutsSection';
 import DataManagementSection from './settings/DataManagementSection';
 import WebhooksSection from './settings/WebhooksSection';
 import SecuritySection from './settings/SecuritySection';
@@ -390,6 +389,19 @@ function Settings() {
         onProviderKeySave={handleProviderKeySave}
         onProviderKeyClear={handleProviderKeyClear}
         onProviderKeyTest={handleProviderKeyTest}
+        softTimeoutMinutes={softTimeoutMinutes}
+        hardTimeoutMinutes={hardTimeoutMinutes}
+        softMinMinutes={processingTimeouts ? Math.max(1, Math.ceil(processingTimeouts.limits.softMin / 60)) : 5}
+        hardMaxMinutes={processingTimeouts ? Math.floor(processingTimeouts.limits.hardMax / 60) : 1440}
+        onSoftTimeoutChange={setSoftTimeoutMinutes}
+        onHardTimeoutChange={setHardTimeoutMinutes}
+        onTimeoutsSave={() => processingTimeoutsMutation.mutate({
+          soft: softTimeoutMinutes * 60,
+          hard: hardTimeoutMinutes * 60,
+        })}
+        timeoutsSaveIsPending={processingTimeoutsMutation.isPending}
+        timeoutsSaveIsSuccess={processingTimeoutsMutation.isSuccess}
+        timeoutsError={timeoutsError}
       />
 
       <AdDetectionSection
@@ -432,22 +444,6 @@ function Settings() {
         onSave={() => retentionMutation.mutate(retentionEnabled ? retentionDays : 0)}
         saveIsPending={retentionMutation.isPending}
         saveIsSuccess={retentionMutation.isSuccess}
-      />
-
-      <ProcessingTimeoutsSection
-        softTimeoutMinutes={softTimeoutMinutes}
-        hardTimeoutMinutes={hardTimeoutMinutes}
-        softMinMinutes={processingTimeouts ? Math.max(1, Math.ceil(processingTimeouts.limits.softMin / 60)) : 5}
-        hardMaxMinutes={processingTimeouts ? Math.floor(processingTimeouts.limits.hardMax / 60) : 1440}
-        onSoftChange={setSoftTimeoutMinutes}
-        onHardChange={setHardTimeoutMinutes}
-        onSave={() => processingTimeoutsMutation.mutate({
-          soft: softTimeoutMinutes * 60,
-          hard: hardTimeoutMinutes * 60,
-        })}
-        saveIsPending={processingTimeoutsMutation.isPending}
-        saveIsSuccess={processingTimeoutsMutation.isSuccess}
-        saveError={timeoutsError}
       />
 
       <DataManagementSection
