@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-04-13
+
+### Security
+- Close CodeQL #33 (py/clear-text-logging-sensitive-data). The helper log introduced in 1.3.1 took `rows: int` — a count — but CodeQL's inter-procedural taint tracking follows the return value of `secrets_crypto.rotate(db, old, new)` because the function is called with password-named arguments, so the `rotated` count inherits taint and any log sink reachable from it is flagged. Remove the success log entirely; the 200 response body already includes `{rotated: N}` for audit, and failure paths still log via `logger.exception`.
+
 ## [1.3.1] - 2026-04-13
 
 ### Security
